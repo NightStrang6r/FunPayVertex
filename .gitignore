@@ -1,10 +1,11 @@
 /venv
 /venv2
-/__pycache__
+__pycache__
 /.idea
 /FunPayAPI/__pycache__
 /logs
 /storage
+/configs
 /build
 /dist
 test.py
