@@ -6,10 +6,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vertex import Vertex
-
 import re
 import os
-import sys
 import time
 import random
 import string
@@ -17,9 +15,11 @@ import psutil
 import telebot
 import logging
 
+from FunPayAPI.account import Account
 from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand, ReplyKeyboardRemove
 from tg_bot import utils, static_keyboards as skb, keyboards as kb, CBT
 from Utils import vertex_tools
+import tg_bot.CBT
 from locales.localizer import Localizer
 
 logger = logging.getLogger("TGBot")
@@ -303,23 +303,26 @@ class TGBot:
         """
         Отправляет статистику аккаунта.
         """
-        self.bot.send_message(m.chat.id, utils.generate_profile_text(self.vertex),
-                              reply_markup=skb.REFRESH_BTN())
-
-    def update_profile(self, c: CallbackQuery):
-        new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
+        new_msg = self.bot.send_message(m.chat.id, "Получаю статистику аккаунта (это может занять некоторое время)...")
         try:
-            self.vertex.account.get()
-            self.vertex.balance = self.vertex.get_balance()
+            self.bot.edit_message_text(text=utils.generate_adv_profile(self.vertex.account), message_id=new_msg.id, chat_id=new_msg.chat.id, reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="adv_profile_1")))
         except:
-            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            self.bot.edit_message_text(text="❌ Не удалось обновить статистику аккаунта.", message_id=new_msg.chat.id, chat_id=new_msg.id)
             logger.debug("TRACEBACK", exc_info=True)
-            self.bot.answer_callback_query(c.id)
             return
 
-        self.bot.delete_message(new_msg.chat.id, new_msg.id)
-        self.bot.edit_message_text(utils.generate_profile_text(self.vertex), c.message.chat.id,
-                                   c.message.id, reply_markup=skb.REFRESH_BTN())
+    def update_profile(self, c: CallbackQuery):
+        """
+        Отправляет статистику аккаунта.
+        """
+        self.bot.edit_message_reply_markup(message_id=c.message.id, chat_id=c.message.chat.id, reply_markup=None)
+        self.bot.edit_message_text(text="Обновляю статистику аккаунта (это может занять некоторое время)...", message_id=c.message.id, chat_id=c.message.chat.id)
+        try:
+            self.bot.edit_message_text(text=utils.generate_adv_profile(self.vertex.account), message_id=c.message.id, chat_id=c.message.chat.id, reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="adv_profile_1")))
+        except:
+            self.bot.edit_message_text(text="❌ Не удалось обновить статистику аккаунта.", message_id=c.message.id, chat_id=c.message.chat.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            return
 
     def act_manual_delivery_test(self, m: Message):
         """
@@ -912,6 +915,7 @@ class TGBot:
         self.msg_handler(self.run_file_handlers, content_types=["photo", "document"], func=lambda m: self.is_file_handler(m))
 
         self.msg_handler(self.send_settings_menu, commands=["menu"])
+        self.cbq_handler(self.update_profile, lambda c: c.data == "adv_profile_1")
         self.msg_handler(self.send_profile, commands=["profile"])
         self.cbq_handler(self.update_profile, lambda c: c.data == CBT.UPDATE_PROFILE)
         self.msg_handler(self.act_manual_delivery_test, commands=["test_lot"])
@@ -950,7 +954,6 @@ class TGBot:
         self.msg_handler(self.close_keyboard, func=lambda m: m.text == "❌ Закрыть ❌")
         self.msg_handler(self.ask_power_off, func=lambda m: m.text == "🔌 Отключение 🔌")
         self.msg_handler(self.open_keyboard, commands=["keyboard"])
-
         self.cbq_handler(self.act_send_funpay_message, lambda c: c.data.startswith(f"{CBT.SEND_FP_MESSAGE}:"))
         self.cbq_handler(self.open_reply_menu, lambda c: c.data.startswith(f"{CBT.BACK_TO_REPLY_KB}:"))
         self.cbq_handler(self.extend_new_message_notification, lambda c: c.data.startswith(f"{CBT.EXTEND_CHAT}:"))
