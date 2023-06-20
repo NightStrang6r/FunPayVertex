@@ -398,11 +398,10 @@ cmd_watermark = "change message watermark"
 cmd_logs = "download current log-file"
 cmd_del_logs = "delete old log-files"
 cmd_about = "about current version"
-cmd_check_updates = "check for updates"
-cmd_update = "upgrade to the next version"
 cmd_sys = "system load information"
 cmd_restart = "restart FPV"
 cmd_power_off = "shutdown FPV"
+cmd_keyboard = "Open keyboard"
 
 # - Variables desc
 v_edit_greeting_text = "Enter the text of the welcome message."

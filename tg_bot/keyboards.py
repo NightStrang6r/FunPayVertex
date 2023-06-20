@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vertex import Vertex
 
-from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B
+from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from tg_bot import CBT, MENU_CFG
 from tg_bot.utils import NotificationTypes, bool_to_text, add_navigation_buttons
@@ -19,11 +19,9 @@ import logging
 import random
 import os
 
-
 logger = logging.getLogger("TGBot")
 localizer = Localizer()
 _ = localizer.translate
-
 
 def power_off(instance_id: int, state: int) -> K:
     """
@@ -604,60 +602,3 @@ def templates_list_ans_mode(c: Vertex, offset: int, node_id: int, username: str,
         kb.add(B(_("gl_back"), None, f"{CBT.BACK_TO_ORDER_KB}:{node_id}:{username}{extra_str}"))
     return kb
 
-
-def plugins_list(c: Vertex, offset: int):
-    """
-    Генерирует клавиатуру со списком плагинов (CBT.PLUGINS_LIST:<offset>).
-
-    :param c: объект Вертекса.
-    :param offset: смещение списка плагинов.
-
-    :return: объект клавиатуры со списком плагинов.
-    """
-    kb = K()
-    plugins = list(c.plugins.keys())[offset: offset + MENU_CFG.PLUGINS_BTNS_AMOUNT]
-    if not plugins and offset != 0:
-        offset = 0
-        plugins = list(c.plugins.keys())[offset: offset + MENU_CFG.PLUGINS_BTNS_AMOUNT]
-
-    for uuid in plugins:
-        #  CBT.EDIT_CMD:номер команды:смещение (для кнопки назад)
-        kb.add(B(f"{c.plugins[uuid].name} {bool_to_text(c.plugins[uuid].enabled)}",
-                 None, f"{CBT.EDIT_PLUGIN}:{uuid}:{offset}"))
-
-    kb = add_navigation_buttons(kb, offset, MENU_CFG.PLUGINS_BTNS_AMOUNT, len(plugins),
-                                len(list(c.plugins.keys())), CBT.PLUGINS_LIST)
-
-    kb.add(B(_("pl_add"), None, f"{CBT.UPLOAD_PLUGIN}:{offset}"))\
-        .add(B(_("gl_back"), None, CBT.MAIN2))
-    return kb
-
-
-def edit_plugin(c: Vertex, uuid: str, offset: int, ask_to_delete: bool = False):
-    """
-    Генерирует клавиатуру управления плагином.
-
-    :param c: объект Вертекса.
-    :param uuid: UUID плагина.
-    :param offset: смещение списка плагинов.
-    :param ask_to_delete: вставить ли подтверждение удаления плагина?
-
-    :return: объект клавиатуры управления плагином.
-    """
-    plugin_obj = c.plugins[uuid]
-    kb = K()
-    active_text = _("pl_deactivate") if c.plugins[uuid].enabled else _("pl_activate")
-    kb.add(B(active_text, None, f"{CBT.TOGGLE_PLUGIN}:{uuid}:{offset}"))
-
-    if plugin_obj.commands:
-        kb.add(B(_("pl_commands"), None, f"{CBT.PLUGIN_COMMANDS}:{uuid}:{offset}"))
-    if plugin_obj.settings_page:
-        kb.add(B(_("pl_settings"), None, f"{CBT.PLUGIN_SETTINGS}:{uuid}:{offset}"))
-
-    if not ask_to_delete:
-        kb.add(B(_("gl_delete"), None, f"{CBT.DELETE_PLUGIN}:{uuid}:{offset}"))
-    else:
-        kb.row(B(_("gl_yes"), None, f"{CBT.CONFIRM_DELETE_PLUGIN}:{uuid}:{offset}"),
-               B(_("gl_no"), None, f"{CBT.CANCEL_DELETE_PLUGIN}:{uuid}:{offset}"))
-    kb.add(B(_("gl_back"), None, f"{CBT.PLUGINS_LIST}:{offset}"))
-    return kb

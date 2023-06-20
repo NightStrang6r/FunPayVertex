@@ -321,7 +321,6 @@ def init_uploader(vertex: Vertex):
     tg.file_handler("upload_auto_response_config", upload_auto_response_config)
     tg.file_handler("upload_auto_delivery_config", upload_auto_delivery_config)
     tg.file_handler("upload_main_config", upload_main_config)
-    tg.file_handler(CBT.UPLOAD_PLUGIN, upload_plugin)
     tg.file_handler(CBT.SEND_FP_MESSAGE, send_funpay_image)
     tg.file_handler(CBT.UPLOAD_IMAGE, upload_image)
 

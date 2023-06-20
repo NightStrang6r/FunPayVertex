@@ -1,4 +1,4 @@
-from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B
+from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, ReplyKeyboardMarkup, KeyboardButton
 from tg_bot import CBT
 from locales.localizer import Localizer
 
@@ -6,6 +6,9 @@ from locales.localizer import Localizer
 localizer = Localizer()
 _ = localizer.translate
 
+OLD_KEYBOARD = ReplyKeyboardMarkup(resize_keyboard=True)\
+    .row(KeyboardButton("📋 Логи 📋"), KeyboardButton("⚙️ Настройки ⚙️"), KeyboardButton("📈 Система 📈"))\
+    .row(KeyboardButton("🔄 Перезапуск 🔄"), KeyboardButton("❌ Закрыть ❌"), KeyboardButton("🔌 Отключение 🔌"))
 
 def CLEAR_STATE_BTN() -> K:
     return K().add(B(_("gl_cancel"), callback_data=CBT.CLEAR_STATE))
