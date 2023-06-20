@@ -80,8 +80,8 @@
 1. Скачайте и установите [Python](https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe).
    1. При установке поставьте галочку у `Add python.exe to PATH` на первом экране установки.
 2. Скачайте FunPay Vertex.
-3. Перенести папку `FunPayVertex-master` в нужное вам место.
-4. Перейдите в папку `FunPayVertex-master`.
+3. Перенести папку `FunPayVertex-main` в нужное вам место.
+4. Перейдите в папку `FunPayVertex-main`.
 5. В адресной строке введите `cmd` и нажмите `Enter`.
 6. В открывшейся командной строке введите `python setup.py`. Дождитесь окончания загрузки пакетов.
 7. Закройте командную строку, настройте конфиги и запустите файл `Start.bat`.
@@ -89,7 +89,7 @@
 ### :hotsprings: Linux (Ubuntu)
 
 1. Выполните команду:
-`wget https://raw.githubusercontent.com/NightStrang6r/FunPayVertex/main/linux-install.sh && bash linux-install.sh`
+`wget https://raw.githubusercontent.com/NightStrang6r/FunPayVertex/main/linux-install.sh -nc && bash linux-install.sh`
 2. Следуйте инструкциям установщика.
 
 Данный скрипт автоматически установит всё необходимое и запустит бота как фоновый процесс.
