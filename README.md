@@ -2,7 +2,7 @@
 <h4 align="center">Простой и эффективный бот для автоматизации FunPay</h4>
 
 <h1 align="center">
-    <img src="https://i.ibb.co/qDNFJGQ/Screenshot-48.png">
+    <img src="https://i.ibb.co/Sc5mL1G/Screenshot-141.png">
 </h>
 
 <h2 align="center">Перед началом настоятельно рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат</a> и <a href="https://dsc.gg/funpay">Discord сервер</a>. Тут и поможем чем сможем и посидеть можно.</h2>
