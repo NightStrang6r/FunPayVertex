@@ -17,11 +17,10 @@ import psutil
 import telebot
 import logging
 
-from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand
+from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand, ReplyKeyboardRemove
 from tg_bot import utils, static_keyboards as skb, keyboards as kb, CBT
 from Utils import vertex_tools
 from locales.localizer import Localizer
-
 
 logger = logging.getLogger("TGBot")
 localizer = Localizer()
@@ -74,9 +73,8 @@ class TGBot:
             "logs": _("cmd_logs"),
             "del_logs": _("cmd_del_logs"),
             "about": _("cmd_about"),
-            "check_updates": _("cmd_check_updates"),
-            "update": _("cmd_update"),
             "sys": _("cmd_sys"),
+            "keyboard": _("cmd_keyboard"),
             "restart": _("cmd_restart"),
             "power_off": _("cmd_power_off")
         }
@@ -895,6 +893,14 @@ class TGBot:
                                                  "Thank you :)", show_alert=True)
         self.open_cp(c)
 
+
+    
+    def open_keyboard(self, m: Message):
+        self.bot.send_message(m.chat.id, "Клавиатура появилась!", reply_markup=skb.OLD_KEYBOARD)
+    
+    def close_keyboard(self, m: Message):
+        self.bot.send_message(m.chat.id, "Клавиатура скрыта!", reply_markup=ReplyKeyboardRemove())
+    
     def __register_handlers(self):
         """
         Регистрирует хэндлеры всех команд.
@@ -932,13 +938,18 @@ class TGBot:
         self.msg_handler(self.send_logs, commands=["logs"])
         self.msg_handler(self.del_logs, commands=["del_logs"])
         self.msg_handler(self.about, commands=["about"])
-        #self.msg_handler(self.check_updates, commands=["check_updates"])
-        #self.msg_handler(self.update, commands=["update"])
         self.msg_handler(self.send_system_info, commands=["sys"])
         self.msg_handler(self.restart_vertex, commands=["restart"])
         self.msg_handler(self.ask_power_off, commands=["power_off"])
-        #self.msg_handler(self.send_announcements_kb, commands=["announcements"])
         self.cbq_handler(self.send_review_reply_text, lambda c: c.data.startswith(f"{CBT.SEND_REVIEW_REPLY_TEXT}:"))
+
+        self.msg_handler(self.send_logs, func=lambda m: m.text == "📋 Логи 📋")
+        self.msg_handler(self.send_settings_menu, func=lambda m: m.text == "⚙️ Настройки ⚙️")
+        self.msg_handler(self.send_system_info, func=lambda m: m.text == "📈 Система 📈")
+        self.msg_handler(self.restart_vertex, func=lambda m: m.text == "🔄 Перезапуск 🔄")
+        self.msg_handler(self.close_keyboard, func=lambda m: m.text == "❌ Закрыть ❌")
+        self.msg_handler(self.ask_power_off, func=lambda m: m.text == "🔌 Отключение 🔌")
+        self.msg_handler(self.open_keyboard, commands=["keyboard"])
 
         self.cbq_handler(self.act_send_funpay_message, lambda c: c.data.startswith(f"{CBT.SEND_FP_MESSAGE}:"))
         self.cbq_handler(self.open_reply_menu, lambda c: c.data.startswith(f"{CBT.BACK_TO_REPLY_KB}:"))
