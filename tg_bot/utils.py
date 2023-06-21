@@ -18,6 +18,7 @@ from os.path import exists
 from FunPayAPI.common.utils import RegularExpressions
 from bs4 import BeautifulSoup as bs
 import tg_bot.CBT
+from bs4 import BeautifulSoup
 from FunPayAPI.account import Account
 from FunPayAPI.types import OrderStatuses
 from FunPayAPI.updater.events import *
@@ -212,12 +213,28 @@ def add_navigation_buttons(keyboard_obj: K, curr_offset: int,
                          B("▶️", callback_data=forward_cb), B("▶️▶️", callback_data=last_cb))
     return keyboard_obj
 
-ORDER_CONFIRMED = {}
 
-if exists("storage/cache/advProfileStat.json"):
-    with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
-        #global ORDER_CONFIRMED
-        ORDER_CONFIRMED = json.loads(f.read())
+
+def generate_profile_text(vertex: Vertex) -> str:
+    """
+    Генерирует текст с информацией об аккаунте.
+
+    :return: сгенерированный текст с информацией об аккаунте.
+    """
+    account = vertex.account
+    balance = vertex.balance
+    return f"""Статистика аккаунта <b><i>{account.username}</i></b>
+
+<b>ID:</b> <code>{account.id}</code>
+<b>Незавершенных заказов:</b> <code>{account.active_sales}</code>
+<b>Баланс:</b> 
+    <b>₽:</b> <code>{balance.total_rub}₽</code>, доступно для вывода <code>{balance.available_rub}₽</code>.
+    <b>$:</b> <code>{balance.total_usd}$</code>, доступно для вывода <code>{balance.available_usd}$</code>.
+    <b>€:</b> <code>{balance.total_eur}€</code>, доступно для вывода <code>{balance.available_eur}€</code>.
+
+<i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
+
+ORDER_CONFIRMED = {}
 
 def message_hook(vertex: Vertex, event: NewMessageEvent):
     if event.message.type not in [MessageTypes.ORDER_CONFIRMED, MessageTypes.ORDER_CONFIRMED_BY_ADMIN, MessageTypes.ORDER_REOPENED, MessageTypes.REFUND]:
@@ -299,6 +316,10 @@ def get_sales(account: Account, start_from: str | None = None, include_paid: boo
     return next_order_id, sells
 
 def generate_adv_profile(account: Account) -> str:
+    if exists("storage/cache/advProfileStat.json"):
+        with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
+            global ORDER_CONFIRMED
+            ORDER_CONFIRMED = json.loads(f.read())
     sales = {"day": 0, "week": 0, "month": 0, "all": 0}
     salesPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
     refunds = {"day": 0, "week": 0, "month": 0, "all": 0}
@@ -410,6 +431,45 @@ def generate_adv_profile(account: Account) -> str:
 
 <i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
 
+def get_orders(acc: Account, start_from: str) -> tuple[str | None, list[str]]:
+    """
+    Получает список ордеров на аккаунте.
+    :return: Список с заказами.
+    """
+    attempts = 3
+    while attempts:
+        try:
+            result = acc.get_sells(start_from=start_from or None, state="paid")
+            break
+        except:
+            attempts -= 1
+            time.sleep(1)
+    else:
+        raise Exception
+    orders = result[1]
+    old_orders = []
+    for i in orders:
+        parser = BeautifulSoup(i.html, "html.parser")
+        time_text = parser.find("div", {"class": "tc-date-left"}).text
+        if any(map(time_text.__contains__, ["сек", "мин", "час", "тол"])):
+            continue
+        old_orders.append(parser.find("div", {"class": "tc-order"}).text)
+    return result[0], old_orders
+
+def get_all_old_orders(acc: Account) -> list[str]:
+    """
+    Получает список все старых ордеров на аккаунте.
+    :param acc: экземпляр аккаунта.
+    :return: список старых заказов.
+    """
+    start_from = ""
+    old_orders = []
+    while start_from is not None:
+        result = get_orders(acc, start_from)
+        start_from = result[0]
+        old_orders.extend(result[1])
+        time.sleep(1)
+    return old_orders
 
 def generate_lot_info_text(lot_obj: configparser.SectionProxy) -> str:
     """
