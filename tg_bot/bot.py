@@ -14,8 +14,8 @@ import string
 import psutil
 import telebot
 import logging
-
-from FunPayAPI.account import Account
+import json
+from os.path import exists
 from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand, ReplyKeyboardRemove
 from tg_bot import utils, static_keyboards as skb, keyboards as kb, CBT
 from Utils import vertex_tools
@@ -74,6 +74,7 @@ class TGBot:
             "del_logs": _("cmd_del_logs"),
             "about": _("cmd_about"),
             "sys": _("cmd_sys"),
+            "old_orders": _("cmd_old_orders"),
             "keyboard": _("cmd_keyboard"),
             "restart": _("cmd_restart"),
             "power_off": _("cmd_power_off")
@@ -297,32 +298,91 @@ class TGBot:
         """
         Отправляет основное меню настроек (новым сообщением).
         """
+        self.vertex.account.get()
+        self.vertex.balance = self.vertex.get_balance()
         self.bot.send_message(m.chat.id, _("desc_main"), reply_markup=kb.settings_sections(self.vertex))
 
     def send_profile(self, m: Message):
         """
         Отправляет статистику аккаунта.
         """
-        new_msg = self.bot.send_message(m.chat.id, "Получаю статистику аккаунта (это может занять некоторое время)...")
+        new_msg = self.bot.send_message(m.chat.id, _("updating_profile"))
         try:
-            self.bot.edit_message_text(text=utils.generate_adv_profile(self.vertex.account), message_id=new_msg.id, chat_id=new_msg.chat.id, reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="adv_profile_1")))
+            self.vertex.account.get()
+            self.vertex.balance = self.vertex.get_balance()
+            self.bot.send_message(m.chat.id, utils.generate_profile_text(self.vertex),
+                                  reply_markup=telebot.types.InlineKeyboardMarkup()
+                                  .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_profile"))
+                                  .add(telebot.types.InlineKeyboardButton("▶️ Еще", callback_data="update_adv_profile"))
+                                  )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
         except:
-            self.bot.edit_message_text(text="❌ Не удалось обновить статистику аккаунта.", message_id=new_msg.chat.id, chat_id=new_msg.id)
+            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            self.bot.answer_callback_query(m.id)
+            return
+        
+    def update_profile(self, c: CallbackQuery):
+        """
+        Обновляет статистику аккаунта.
+        """
+        new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
+        try:
+            self.vertex.account.get()
+            self.vertex.balance = self.vertex.get_balance()
+            self.bot.edit_message_text(utils.generate_profile_text(self.vertex), c.message.chat.id,
+                                c.message.id,
+                                reply_markup=telebot.types.InlineKeyboardMarkup()
+                                .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_profile"))
+                                .add(telebot.types.InlineKeyboardButton("▶️ Еще", callback_data="update_adv_profile"))
+                                )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
+        except:
+            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            self.bot.answer_callback_query(c.id)
+            return
+
+        
+
+    def update_adv_profile(self, c: CallbackQuery):
+        """
+        Обновляет дополнительную статистику аккаунта.
+        """
+        new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
+        try:
+            self.vertex.account.get()
+            self.vertex.balance = self.vertex.get_balance()
+            self.bot.edit_message_text(utils.generate_adv_profile(self.vertex.account), c.message.chat.id,
+                                c.message.id,
+                                reply_markup=telebot.types.InlineKeyboardMarkup()
+                                .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_adv_profile"))
+                                .add(telebot.types.InlineKeyboardButton("◀️ Назад", callback_data="update_profile"))
+                                )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
+        except:
+            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            self.bot.answer_callback_query(c.id)
+            return
+
+    def send_orders(self, m: telebot.types.Message):
+        new_mes = self.bot.send_message(m.chat.id, "Сканирую заказы (это может занять какое-то время)...")
+        try:
+            orders = utils.get_all_old_orders(self.vertex.account)
+        except:
+            self.bot.edit_message_text("❌ Не удалось получить список заказов.", new_mes.chat.id, new_mes.id)
             logger.debug("TRACEBACK", exc_info=True)
             return
 
-    def update_profile(self, c: CallbackQuery):
-        """
-        Отправляет статистику аккаунта.
-        """
-        self.bot.edit_message_reply_markup(message_id=c.message.id, chat_id=c.message.chat.id, reply_markup=None)
-        self.bot.edit_message_text(text="Обновляю статистику аккаунта (это может занять некоторое время)...", message_id=c.message.id, chat_id=c.message.chat.id)
-        try:
-            self.bot.edit_message_text(text=utils.generate_adv_profile(self.vertex.account), message_id=c.message.id, chat_id=c.message.chat.id, reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="adv_profile_1")))
-        except:
-            self.bot.edit_message_text(text="❌ Не удалось обновить статистику аккаунта.", message_id=c.message.id, chat_id=c.message.chat.id)
-            logger.debug("TRACEBACK", exc_info=True)
-            return
+        if not orders:
+                self.bot.edit_message_text("❌ Просроченных заказов нет.", new_mes.chat.id, new_mes.id)
+                logger.debug("TRACEBACK", exc_info=True)
+                return
+
+        orders_text = ", ".join(orders)
+        text = f"Здравствуйте!\n\nПрошу подтвердить выполнение следующих заказов:\n{orders_text}\n\nЗаранее благодарю,\nС уважением."
+        self.bot.edit_message_text(f"<code>{utils.escape(text)}</code>", new_mes.chat.id, new_mes.id)
 
     def act_manual_delivery_test(self, m: Message):
         """
@@ -896,8 +956,6 @@ class TGBot:
                                                  "Thank you :)", show_alert=True)
         self.open_cp(c)
 
-
-    
     def open_keyboard(self, m: Message):
         self.bot.send_message(m.chat.id, "Клавиатура появилась!", reply_markup=skb.OLD_KEYBOARD)
     
@@ -915,8 +973,10 @@ class TGBot:
         self.msg_handler(self.run_file_handlers, content_types=["photo", "document"], func=lambda m: self.is_file_handler(m))
 
         self.msg_handler(self.send_settings_menu, commands=["menu"])
-        self.cbq_handler(self.update_profile, lambda c: c.data == "adv_profile_1")
+        self.cbq_handler(self.update_profile, lambda c: c.data == "update_profile")
+        self.cbq_handler(self.update_adv_profile, lambda c: c.data == "update_adv_profile")
         self.msg_handler(self.send_profile, commands=["profile"])
+        self.msg_handler(self.send_orders, commands=["old_orders"])
         self.cbq_handler(self.update_profile, lambda c: c.data == CBT.UPDATE_PROFILE)
         self.msg_handler(self.act_manual_delivery_test, commands=["test_lot"])
         self.msg_handler(self.act_upload_image, commands=["upload_img"])
