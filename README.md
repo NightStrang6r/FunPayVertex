@@ -21,6 +21,7 @@
 - [Установка](#arrow_down-установка)
   - [Windows](#large_blue_diamond-windows)
   - [Linux (Ubuntu)](#hotsprings-linux-ubuntu)
+  - [Docker](#ship-docker)
 - [Настройка конфигов](#hammer_and_wrench-настройка-конфигов)
 - [Мне нужна помощь](#question-мне-нужна-помощь)
 - [Понравилось приложение?](#tada-Понравилось-приложение)
