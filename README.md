@@ -94,6 +94,15 @@
 
 Данный скрипт автоматически установит всё необходимое и запустит бота как фоновый процесс.
 
+### :ship: Docker
+
+1. Клонируйте репозиторий: `git clone https://github.com/NightStrang6r/FunPayVertex.git`
+2. Выполните сборку образа: `docker build . --no-cache -t vertex`
+3. Запустите контейнер в интерактивном режиме: `docker run -i --rm -v vertex-configs:/app/configs --name vertex vertex`
+4. Следуйте инструкциям установщика.
+
+Последующий запуск можно производить в detached режиме: `docker run -d --rm -v vertex-configs:/app/configs --name vertex vertex`
+
 ## :hammer_and_wrench: Настройка конфигов
 
 1. Все конфиги находятся в папке `configs`
