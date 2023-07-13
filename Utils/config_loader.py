@@ -70,60 +70,6 @@ def load_main_config(config_path: str):
             "golden_key": "any",
             "user_agent": "any+empty",
             "autoRaise": ["0", "1"],
-            "autoResponse": ["0", "1"],
-            "autoDelivery": ["0", "1"],
-            "multiDelivery": ["0", "1"],
-            "autoRestore": ["0", "1"],
-            "autoDisable": ["0", "1"],
-            "oldMsgGetMode": ["0", "1"]
-        },
-
-        "Telegram": {
-            "enabled": ["0", "1"],
-            "token": "any+empty",
-            "secretKey": "any"
-        },
-
-        "BlockList": {
-            "blockDelivery": ["0", "1"],
-            "blockResponse": ["0", "1"],
-            "blockNewMessageNotification": ["0", "1"],
-            "blockNewOrderNotification": ["0", "1"],
-            "blockCommandNotification": ["0", "1"]
-        },
-
-        "NewMessageView": {
-            "includeMyMessages": ["0", "1"],
-            "includeFPMessages": ["0", "1"],
-            "includeBotMessages": ["0", "1"],
-            "notifyOnlyMyMessages": ["0", "1"],
-            "notifyOnlyFPMessages": ["0", "1"],
-            "notifyOnlyBotMessages": ["0", "1"],
-        },
-
-        "Greetings": {
-            "cacheInitChats": ["0", "1"],
-            "ignoreSystemMessages": ["0", "1"],
-            "sendGreetings": ["0", "1"],
-            "greetingsText": "any"
-        },
-
-        "OrderConfirm": {
-            "sendReply": ["0", "1"],
-            "replyText": "any"
-        },
-
-        "ReviewReply": {
-            "star1Reply": ["0", "1"],
-            "star2Reply": ["0", "1"],
-            "star3Reply": ["0", "1"],
-            "star4Reply": ["0", "1"],
-            "star5Reply": ["0", "1"],
-            "star1ReplyText": "any+empty",
-            "star2ReplyText": "any+empty",
-            "star3ReplyText": "any+empty",
-            "star4ReplyText": "any+empty",
-            "star5ReplyText": "any+empty",
         },
 
         "Proxy": {
@@ -136,8 +82,6 @@ def load_main_config(config_path: str):
         },
 
         "Other": {
-            "watermark": "any+empty",
-            "requestsDelay": [str(i) for i in range(1, 101)],
             "language": ["ru", "eng"]
         }
     }
@@ -149,15 +93,7 @@ def load_main_config(config_path: str):
         for param_name in values[section_name]:
 
             # UPDATE 009
-            if section_name == "FunPay" and param_name == "oldMsgGetMode" and param_name not in config[section_name]:
-                config.set("FunPay", "oldMsgGetMode", "0")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-            elif section_name == "Greetings" and param_name == "ignoreSystemMessages" and param_name not in config[section_name]:
-                config.set("Greetings", "ignoreSystemMessages", "0")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-            elif section_name == "Other" and param_name == "language" and param_name not in config[section_name]:
+            if section_name == "Other" and param_name == "language" and param_name not in config[section_name]:
                 config.set("Other", "language", "ru")
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
@@ -173,94 +109,4 @@ def load_main_config(config_path: str):
             except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
                 raise ConfigParseError(config_path, section_name, e)
 
-    return config
-
-
-def load_auto_response_config(config_path: str):
-    """
-    Парсит и проверяет на правильность конфиг команд.
-
-    :param config_path: путь до конфига команд.
-
-    :return: спарсеный конфиг команд.
-    """
-    try:
-        config = create_config_obj(config_path)
-    except configparser.DuplicateSectionError as e:
-        raise ConfigParseError(config_path, e.section, DuplicateSectionErrorWrapper())
-
-    command_sets = []
-    for command in config.sections():
-        try:
-            check_param("response", config[command])
-            check_param("telegramNotification", config[command], valid_values=["0", "1"], raise_if_not_exists=False)
-            check_param("notificationText", config[command], raise_if_not_exists=False)
-        except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
-            raise ConfigParseError(config_path, command, e)
-
-        if "|" in command:
-            command_sets.append(command)
-
-    for command_set in command_sets:
-        commands = command_set.split("|")
-        parameters = config[command_set]
-
-        for new_command in commands:
-            new_command = new_command.strip()
-            if not new_command:
-                continue
-            if new_command in config.sections():
-                raise ConfigParseError(config_path, command_set, SubCommandAlreadyExists(new_command))
-            config.add_section(new_command)
-            for param_name in parameters:
-                config.set(new_command, param_name, parameters[param_name])
-    return config
-
-
-def load_raw_auto_response_config(config_path: str):
-    """
-    Загружает исходный конфиг автоответчика.
-
-    :param config_path: путь до конфига команд.
-
-    :return: спарсеный конфиг команд.
-    """
-    return create_config_obj(config_path)
-
-
-def load_auto_delivery_config(config_path: str):
-    """
-    Парсит и проверяет на правильность конфиг автовыдачи.
-
-    :param config_path: путь до конфига автовыдачи.
-
-    :return: спарсеный конфиг товаров для автовыдачи.
-    """
-    try:
-        config = create_config_obj(config_path)
-    except configparser.DuplicateSectionError as e:
-        raise ConfigParseError(config_path, e.section, DuplicateSectionErrorWrapper())
-
-    for lot_title in config.sections():
-        try:
-            lot_response = check_param("response", config[lot_title])
-            products_file_name = check_param("productsFileName", config[lot_title], raise_if_not_exists=False)
-            check_param("disable", config[lot_title], valid_values=["0", "1"], raise_if_not_exists=False)
-            check_param("disableAutoRestore", config[lot_title], valid_values=["0", "1"], raise_if_not_exists=False)
-            check_param("disableAutoDisable", config[lot_title], valid_values=["0", "1"], raise_if_not_exists=False)
-            check_param("disableAutoDelivery", config[lot_title], valid_values=["0", "1"], raise_if_not_exists=False)
-            if products_file_name is None:
-                # Если данного параметра нет, то в текущем лоте более нечего проверять -> переход на след. итерацию.
-                continue
-        except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
-            raise ConfigParseError(config_path, lot_title, e)
-
-        # Проверяем, существует ли файл.
-        if not os.path.exists(f"storage/products/{products_file_name}"):
-            raise ConfigParseError(config_path, lot_title,
-                                   ProductsFileNotFoundError(f"storage/products/{products_file_name}"))
-
-        # Проверяем, есть ли хотя бы 1 переменная $product в тексте response.
-        if "$product" not in lot_response:
-            raise ConfigParseError(config_path, lot_title, NoProductVarError())
     return config

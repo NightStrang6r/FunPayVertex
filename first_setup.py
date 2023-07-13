@@ -7,67 +7,12 @@ from configparser import ConfigParser
 import time
 from colorama import Fore, Style
 
-
 default_config = {
     "FunPay": {
         "golden_key": "",
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
-        "autoRaise": "0",
-        "autoResponse": "0",
-        "autoDelivery": "0",
-        "multiDelivery": "0",
-        "autoRestore": "0",
-        "autoDisable": "0",
-        "oldMsgGetMode": "0"
+        "autoRaise": "1",
     },
-    "Telegram": {
-        "enabled": "0",
-        "token": "",
-        "secretKey": "СекретныйПароль"
-    },
-
-    "BlockList": {
-        "blockDelivery": "0",
-        "blockResponse": "0",
-        "blockNewMessageNotification": "0",
-        "blockNewOrderNotification": "0",
-        "blockCommandNotification": "0"
-    },
-
-    "NewMessageView": {
-        "includeMyMessages": "1",
-        "includeFPMessages": "1",
-        "includeBotMessages": "0",
-        "notifyOnlyMyMessages": "0",
-        "notifyOnlyFPMessages": "0",
-        "notifyOnlyBotMessages": "0"
-    },
-
-    "Greetings": {
-        "cacheInitChats": "0",
-        "ignoreSystemMessages": "0",
-        "sendGreetings": "0",
-        "greetingsText": "Привет, $username!"
-    },
-
-    "OrderConfirm": {
-        "sendReply": "1",
-        "replyText": "$username, спасибо за подтверждение заказа $order_id!\nЕсли не сложно, оставь, пожалуйста, отзыв!"
-    },
-
-    "ReviewReply": {
-        "star1Reply": "0",
-        "star2Reply": "0",
-        "star3Reply": "0",
-        "star4Reply": "0",
-        "star5Reply": "0",
-        "star1ReplyText": "",
-        "star2ReplyText": "",
-        "star3ReplyText": "",
-        "star4ReplyText": "",
-        "star5ReplyText": "",
-    },
-
     "Proxy": {
         "enable": "0",
         "ip": "",
@@ -76,10 +21,7 @@ default_config = {
         "password": "",
         "check": "0"
     },
-
     "Other": {
-        "watermark": "",
-        "requestsDelay": "4",
         "language": "ru"
     }
 }

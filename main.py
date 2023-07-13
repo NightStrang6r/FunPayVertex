@@ -1,7 +1,6 @@
 import Utils.config_loader as cfg_loader
 from first_setup import first_setup
 from colorama import Fore, Style
-import Utils.logger
 from Utils.logger import LOGGER_CONFIG
 import logging.config
 import colorama
@@ -79,12 +78,6 @@ try:
     localizer = Localizer(MAIN_CFG["Other"]["language"])
     _ = localizer.translate
 
-    logger.info("$MAGENTAЗагружаю конфиг auto_response.cfg...")
-    AR_CFG = cfg_loader.load_auto_response_config("configs/auto_response.cfg")
-    RAW_AR_CFG = cfg_loader.load_raw_auto_response_config("configs/auto_response.cfg")
-
-    logger.info("$MAGENTAЗагружаю конфиг auto_delivery.cfg...")
-    AD_CFG = cfg_loader.load_auto_delivery_config("configs/auto_delivery.cfg")
 except excs.ConfigParseError as e:
     logger.error(e)
     logger.error("Завершаю программу...")
@@ -103,11 +96,11 @@ except:
 localizer = Localizer(MAIN_CFG["Other"]["language"])
 
 try:
-    Vertex(MAIN_CFG, AD_CFG, AR_CFG, RAW_AR_CFG, VERSION).init().run()
+    Vertex(MAIN_CFG, VERSION).init().run()
 except KeyboardInterrupt:
     logger.info("Завершаю программу...")
     sys.exit()
-except:
+except Exception as ex:
     logger.critical("При работе Вертекса произошла необработанная ошибка.")
     logger.debug("TRACEBACK", exc_info=True)
     logger.critical("Завершаю программу...")

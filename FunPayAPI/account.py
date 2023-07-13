@@ -17,7 +17,6 @@ import re
 from . import types
 from .common import exceptions, utils, enums
 
-
 logger = logging.getLogger("FunPayAPI.account")
 PRIVATE_CHAT_ID_RE = re.compile(r"users-\d+-\d+$")
 
