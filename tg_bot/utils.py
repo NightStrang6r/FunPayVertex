@@ -315,7 +315,21 @@ def get_sales(account: Account, start_from: str | None = None, include_paid: boo
 
     return next_order_id, sells
 
-def generate_adv_profile(account: Account) -> str:
+def generate_adv_profile(vertex: Vertex) -> str:
+    account = vertex.account
+    balance = vertex.balance
+    if balance.total_eur != 0:
+        currency = "€"
+        balance.balance.total_eur
+    elif balance.total_eur != 0:
+        currency = "$"
+        balance.balance.total_eur
+    elif balance.total_eur != 0:
+        currency = "₽"
+        balance.balance.total_eur
+    else:
+        balance = 0
+        currency = "₽"
     if exists("storage/cache/advProfileStat.json"):
         with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
             global ORDER_CONFIRMED

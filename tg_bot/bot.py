@@ -76,12 +76,9 @@ class TGBot:
             "sys": _("cmd_sys"),
             "old_orders": _("cmd_old_orders"),
             "keyboard": _("cmd_keyboard"),
+            "change_cookie": _("cmd_change_cookie"),
             "restart": _("cmd_restart"),
             "power_off": _("cmd_power_off")
-        }
-        self.__default_notification_settings = {
-            utils.NotificationTypes.ad: 1,
-            utils.NotificationTypes.announcement: 1
         }
 
     # User states
@@ -343,7 +340,18 @@ class TGBot:
             self.bot.answer_callback_query(c.id)
             return
 
-        
+    def change_cookie(self, m: telebot.types.Message):
+        if len(m.text.split(" ")) == 2:
+            if len(m.text.split(" ")[1]) != 32:
+                self.bot.send_message(m.chat.id, "Неверный формат токена. Попробуй еще раз!")
+                return
+            self.vertex.account.golden_key = m.text.split(" ")[1]
+            self.vertex.MAIN_CFG.set("FunPay", "golden_key", m.text.split(" ")[1])
+            self.vertex.save_config(self.vertex.MAIN_CFG, "configs/_main.cfg")
+            self.vertex.account.get(True)
+            self.bot.send_message(m.chat.id, "✅ Успешно изменено перезапустите бота.")
+        else:
+            self.bot.send_message(m.chat.id, "Команда введена не правильно! /change_cookie [golden_key]")
 
     def update_adv_profile(self, c: CallbackQuery):
         """
@@ -353,7 +361,7 @@ class TGBot:
         try:
             self.vertex.account.get()
             self.vertex.balance = self.vertex.get_balance()
-            self.bot.edit_message_text(utils.generate_adv_profile(self.vertex.account), c.message.chat.id,
+            self.bot.edit_message_text(utils.generate_adv_profile(self.vertex), c.message.chat.id,
                                 c.message.id,
                                 reply_markup=telebot.types.InlineKeyboardMarkup()
                                 .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_adv_profile"))
@@ -514,52 +522,6 @@ class TGBot:
         Отправляет информацию о текущей версии бота.
         """
         self.bot.send_message(m.chat.id, _("about", self.vertex.VERSION))
-
-#    def check_updates(self, m: Message):
-#        curr_tag = f"v{self.vertex.VERSION}"
-#        release = updater.get_new_release(curr_tag)
-#        if isinstance(release, int):
-#            errors = {
-#                1: ["update_no_tags", ()],
-#                2: ["update_lasted", (curr_tag,)],
-#                3: ["update_get_error", ()],
-#            }
-#            self.bot.send_message(m.chat.id, _(errors[release][0], *errors[release][1]))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_available", release.name, release.description))
-#        self.bot.send_message(m.chat.id, _("update_update"))
-#
-#    def update(self, m: Message):
-#        curr_tag = f"v{self.vertex.VERSION}"
-#        release = updater.get_new_release(curr_tag)
-#        if isinstance(release, int):
-#            errors = {
-#                1: ["update_no_tags", ()],
-#                2: ["update_lasted", (curr_tag,)],
-#                3: ["update_get_error", ()],
-#            }
-#            self.bot.send_message(m.chat.id, _(errors[release][0], *errors[release][1]))
-#            return
-#
-#        if updater.create_backup():
-#            self.bot.send_message(m.chat.id, _("update_backup_error"))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_backup_created"))
-#
-#        if updater.download_zip(release.exe_link if getattr(sys, "frozen", False) else release.sources_link) \
-#                or (release_folder := updater.extract_update_archive()) == 1:
-#            self.bot.send_message(m.chat.id, _("update_download_error"))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_downloaded"))
-#
-#        if updater.install_release(release_folder):
-#            self.bot.send_message(m.chat.id, _("update_install_error"))
-#            return
-#
-#        if getattr(sys, 'frozen', False):
-#            self.bot.send_message(m.chat.id, _("update_done_exe"))
-#        else:
-#            self.bot.send_message(m.chat.id, _("update_done"))
 
     def send_system_info(self, m: Message):
         """
@@ -977,6 +939,7 @@ class TGBot:
         self.cbq_handler(self.update_adv_profile, lambda c: c.data == "update_adv_profile")
         self.msg_handler(self.send_profile, commands=["profile"])
         self.msg_handler(self.send_orders, commands=["old_orders"])
+        self.msg_handler(self.change_cookie, commands=["change_cookie"])
         self.cbq_handler(self.update_profile, lambda c: c.data == CBT.UPDATE_PROFILE)
         self.msg_handler(self.act_manual_delivery_test, commands=["test_lot"])
         self.msg_handler(self.act_upload_image, commands=["upload_img"])
