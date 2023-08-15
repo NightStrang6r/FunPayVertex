@@ -80,6 +80,10 @@ class TGBot:
             "restart": _("cmd_restart"),
             "power_off": _("cmd_power_off")
         }
+        self.__default_notification_settings = {
+            utils.NotificationTypes.ad: 1,
+            utils.NotificationTypes.announcement: 1
+        }
 
     # User states
     def get_state(self, chat_id: int, user_id: int) -> dict | None:
