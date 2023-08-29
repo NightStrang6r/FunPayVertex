@@ -24,6 +24,7 @@ import time
 import re
 
 
+
 LAST_STACK_ID = ""
 MSG_LOG_LAST_STACK_ID = ""
 
@@ -731,6 +732,10 @@ def send_bot_started_notification_handler(c: Vertex, *args):
             continue
 
 
+
+
+
+
 BIND_TO_INIT_MESSAGE = [save_init_chats_handler]
 
 BIND_TO_LAST_CHAT_MESSAGE_CHANGED = [old_log_msg_handler,
@@ -740,7 +745,7 @@ BIND_TO_LAST_CHAT_MESSAGE_CHANGED = [old_log_msg_handler,
                                      process_review_handler,
                                      old_send_new_msg_notification_handler,
                                      send_command_notification_handler,
-                                     test_auto_delivery_handler]
+                                     test_auto_delivery_handler,]
 
 BIND_TO_NEW_MESSAGE = [log_msg_handler,
                        greetings_handler,
@@ -749,7 +754,8 @@ BIND_TO_NEW_MESSAGE = [log_msg_handler,
                        process_review_handler,
                        send_new_msg_notification_handler,
                        send_command_notification_handler,
-                       test_auto_delivery_handler]
+                       test_auto_delivery_handler,
+                       utils.message_hook]
 
 BIND_TO_POST_LOTS_RAISE = [send_categories_raised_notification_handler]
 

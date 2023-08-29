@@ -483,27 +483,6 @@ order_id: str - ID заказа.
 no_refund: 0/1 - убрать ли кнопку возврата средств.
 """
 
-
-# Плагины
-PLUGINS_LIST = "44"
-"""
-Callback для открытия списка плагинов.
-Использование: CBT.PLUGINS_LIST:offset
-
-offset: int - смещение списка плагинов.
-"""
-
-
-EDIT_PLUGIN = "45"
-"""
-Callback для открытия меню информации о плагине.
-Использование: CBT.EDIT_PLUGIN:UUID:offset
-
-UUID: str - UUID плагина.
-offset: int - смещение списка плагинов.
-"""
-
-
 TOGGLE_PLUGIN = "46"
 """
 Callback для активации / деактивации плагина.

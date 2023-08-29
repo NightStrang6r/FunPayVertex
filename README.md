@@ -2,7 +2,7 @@
 <h4 align="center">Простой и эффективный бот для автоматизации FunPay</h4>
 
 <h1 align="center">
-    <img src="https://i.ibb.co/qDNFJGQ/Screenshot-48.png">
+    <img src="https://i.ibb.co/Sc5mL1G/Screenshot-141.png">
 </h>
 
 <h2 align="center">Перед началом настоятельно рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат</a> и <a href="https://dsc.gg/funpay">Discord сервер</a>. Тут и поможем чем сможем и посидеть можно.</h2>
@@ -80,29 +80,19 @@
 1. Скачайте и установите [Python](https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe).
    1. При установке поставьте галочку у `Add python.exe to PATH` на первом экране установки.
 2. Скачайте FunPay Vertex.
-3. Перенести папку `FunPayVertex-master` в нужное вам место.
-4. Перейдите в папку `FunPayVertex-master`.
+3. Перенести папку `FunPayVertex-main` в нужное вам место.
+4. Перейдите в папку `FunPayVertex-main`.
 5. В адресной строке введите `cmd` и нажмите `Enter`.
 6. В открывшейся командной строке введите `python setup.py`. Дождитесь окончания загрузки пакетов.
 7. Закройте командную строку, настройте конфиги и запустите файл `Start.bat`.
 
 ### :hotsprings: Linux (Ubuntu)
 
-1. Введите следующие команды для установки Python 3.11.
-   1. `sudo apt update`
-   2. `sudo apt install software-properties-common`
-   3. `sudo add-apt-repository ppa:deadsnakes/ppa`
-   4. `sudo apt update`
-   5. `sudo apt install python3.11 python3.11-dev python3.11-gdbm python3.11-venv`
-   6. `sudo apt install curl`
-   7. `sudo apt install gcc`
-   8. `curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11`
+1. Выполните команду:
+`wget https://raw.githubusercontent.com/NightStrang6r/FunPayVertex/main/linux-install.sh -nc && bash linux-install.sh`
+2. Следуйте инструкциям установщика.
 
-2. Скачайте `git` с помощью команды `sudo apt install git`.
-3. Скачайте FunPayVertex с помощью команды `git clone https://github.com/NightStrang6r/FunPayVertex`.
-4. Перейдите в папку `FunPayVertex` с помощью команрды `cd FunPayVertex`.
-5. Установите нужные пакеты с помощью команды `python3.11 setup.py`.
-6. Настройте конфиги и запустите FunPay Vertex с помощью команды `python3.11 main.py`.
+Данный скрипт автоматически установит всё необходимое и запустит бота как фоновый процесс.
 
 ## :hammer_and_wrench: Настройка конфигов
 

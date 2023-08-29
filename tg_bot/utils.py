@@ -6,14 +6,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vertex import Vertex
-
+from locales.localizer import Localizer
 from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B
 import configparser
 import datetime
 import os.path
 import json
 import time
-
+import json
+from os.path import exists
+from FunPayAPI.common.utils import RegularExpressions
+from bs4 import BeautifulSoup as bs
+import tg_bot.CBT
+from bs4 import BeautifulSoup
+from FunPayAPI.account import Account
+from FunPayAPI.types import OrderStatuses
+from FunPayAPI.updater.events import *
+localizer = Localizer()
+_ = localizer.translate
 import Utils.vertex_tools
 from tg_bot import CBT
 
@@ -204,6 +214,7 @@ def add_navigation_buttons(keyboard_obj: K, curr_offset: int,
     return keyboard_obj
 
 
+
 def generate_profile_text(vertex: Vertex) -> str:
     """
     Генерирует текст с информацией об аккаунте.
@@ -223,6 +234,256 @@ def generate_profile_text(vertex: Vertex) -> str:
 
 <i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
 
+ORDER_CONFIRMED = {}
+
+def message_hook(vertex: Vertex, event: NewMessageEvent):
+    if event.message.type not in [MessageTypes.ORDER_CONFIRMED, MessageTypes.ORDER_CONFIRMED_BY_ADMIN, MessageTypes.ORDER_REOPENED, MessageTypes.REFUND]:
+        return
+    if event.message.type not in [MessageTypes.ORDER_REOPENED, MessageTypes.REFUND] and bs(event.message.html, "html.parser").find("a").text == vertex.account.username:
+        return
+
+    id = RegularExpressions().ORDER_ID.findall(str(event.message))[0][1:]
+
+    if event.message.type in [MessageTypes.ORDER_REOPENED, MessageTypes.REFUND]:
+        if id in ORDER_CONFIRMED:
+            del ORDER_CONFIRMED[id]
+    else:
+        ORDER_CONFIRMED[id] = {"time": time.time(), "price": vertex.account.get_order(id).sum}
+        with open("storage/cache/advProfileStat.json", "w", encoding="UTF-8") as f:
+            f.write(json.dumps(ORDER_CONFIRMED, indent=4, ensure_ascii=False))
+
+
+def get_sales(account: Account, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
+              include_refunded: bool = True, exclude_ids: list[str] | None = None,
+              **filters) -> tuple[str | None, list[types.OrderShortcut]]:
+    exclude_ids = exclude_ids or []
+    link = "https://funpay.com/orders/trade?"
+
+    for name in filters:
+        link += f"{name}={filters[name]}&"
+    link = link[:-1]
+
+    if start_from:
+        filters["continue"] = start_from
+
+    response = account.method("post" if start_from else "get", link, {}, filters, raise_not_200=True)
+    html_response = response.content.decode()
+
+    parser = bs(html_response, "html.parser")
+    check_user = parser.find("div", {"class": "content-account content-account-login"})
+
+    next_order_id = parser.find("input", {"type": "hidden", "name": "continue"})
+    if not next_order_id:
+        next_order_id = None
+    else:
+        next_order_id = next_order_id.get("value")
+
+    order_divs = parser.find_all("a", {"class": "tc-item"})
+    if not order_divs:
+        return None, []
+
+    sells = []
+    for div in order_divs:
+        classname = div.get("class")
+        if "warning" in classname:
+            if not include_refunded:
+                continue
+            order_status = types.OrderStatuses.REFUNDED
+        elif "info" in classname:
+            if not include_paid:
+                continue
+            order_status = types.OrderStatuses.PAID
+        else:
+            if not include_closed:
+                continue
+            order_status = types.OrderStatuses.CLOSED
+
+        order_id = div.find("div", {"class": "tc-order"}).text[1:]
+        if order_id in exclude_ids:
+            continue
+
+        description = div.find("div", {"class": "order-desc"}).find("div").text
+        price = float(div.find("div", {"class": "tc-price"}).text.split(" ")[0])
+
+        buyer_div = div.find("div", {"class": "media-user-name"}).find("span")
+        buyer_username = buyer_div.text
+        buyer_id = int(buyer_div.get("data-href")[:-1].split("https://funpay.com/users/")[1])
+
+        order_obj = types.OrderShortcut(order_id, description, price, buyer_username, buyer_id, order_status,
+                                        datetime.datetime.now(), "", str(div))
+        sells.append(order_obj)
+
+    return next_order_id, sells
+
+def generate_adv_profile(vertex: Vertex) -> str:
+    account = vertex.account
+    balance = vertex.balance
+    if balance.total_eur != 0:
+        currency = "€"
+        balance.balance.total_eur
+    elif balance.total_eur != 0:
+        currency = "$"
+        balance.balance.total_eur
+    elif balance.total_eur != 0:
+        currency = "₽"
+        balance.balance.total_eur
+    else:
+        balance = 0
+        currency = "₽"
+    if exists("storage/cache/advProfileStat.json"):
+        with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
+            global ORDER_CONFIRMED
+            ORDER_CONFIRMED = json.loads(f.read())
+    sales = {"day": 0, "week": 0, "month": 0, "all": 0}
+    salesPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
+    refunds = {"day": 0, "week": 0, "month": 0, "all": 0}
+    refundsPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
+    canWithdraw = {"now": 0.0, "hour": 0.0, "day": 0.0, "2day": 0.0}
+
+    account.get()
+
+    for order in ORDER_CONFIRMED.copy():
+        if time.time() - ORDER_CONFIRMED[order]["time"] > 172800:
+            del ORDER_CONFIRMED[order]
+            continue
+        if time.time() - ORDER_CONFIRMED[order]["time"] > 169200:
+            canWithdraw["hour"] += ORDER_CONFIRMED[order]["price"]
+        elif time.time() - ORDER_CONFIRMED[order]["time"] > 86400:
+            canWithdraw["day"] += ORDER_CONFIRMED[order]["price"]
+        else:
+            canWithdraw["2day"] += ORDER_CONFIRMED[order]["price"]
+
+    randomLotPageLink = bs(account.method("get", "https://funpay.com/lots/693/", {}, {}).text, "html.parser").find("a", {"class": "tc-item"})["href"]
+    randomLotPageParse = bs(account.method("get", randomLotPageLink, {}, {}).text, "html.parser")
+
+    balance = randomLotPageParse.select_one(".badge-balance").text.split(" ")[0]
+    currency = randomLotPageParse.select_one(".badge-balance").text.split(" ")[1]
+
+    canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-rub"]
+    if currency == "$":
+        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-usd"]
+    elif currency == "€":
+        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-eur"]
+
+    next_order_id, all_sales = get_sales(account)
+
+    while next_order_id != None:
+        time.sleep(1)
+        next_order_id, new_sales = get_sales(account, start_from=next_order_id)
+        all_sales += new_sales
+
+    for sale in all_sales:
+        if sale.status == OrderStatuses.REFUNDED:
+            refunds["all"] += 1
+            refundsPrice["all"] += sale.price
+        else:
+            sales["all"] += 1
+            salesPrice["all"] += sale.price
+
+        upperDate = bs(sale.html, "html.parser").find("div", {"class": "tc-date-time"}).text
+        date = bs(sale.html, "html.parser").find("div", {"class": "tc-date-left"}).text
+
+        if "сегодня" in upperDate or "сьогодні" in upperDate or "today" in upperDate:
+            if sale.status == OrderStatuses.REFUNDED:
+                refunds["day"] += 1
+                refunds["week"] += 1
+                refunds["month"] += 1
+                refundsPrice["day"] += sale.price
+                refundsPrice["week"] += sale.price
+                refundsPrice["month"] += sale.price
+            else:
+                sales["day"] += 1
+                sales["week"] += 1
+                sales["month"] += 1
+                salesPrice["day"] += sale.price
+                salesPrice["week"] += sale.price
+                salesPrice["month"] += sale.price
+        elif "день" in date or "дня" in date or "дней" in date or "дні" in date or "day" in date or "час" in date or "hour" in date or "годин" in date:
+            if sale.status == OrderStatuses.REFUNDED:
+                refunds["week"] += 1
+                refunds["month"] += 1
+                refundsPrice["week"] += sale.price
+                refundsPrice["month"] += sale.price
+            else:
+                sales["week"] += 1
+                sales["month"] += 1
+                salesPrice["week"] += sale.price
+                salesPrice["month"] += sale.price
+        elif "недел" in date or "тижд" in date or "week" in date:
+            if sale.status == OrderStatuses.REFUNDED:
+                refunds["month"] += 1
+                refundsPrice["month"] += sale.price
+            else:
+                sales["month"] += 1
+                salesPrice["month"] += sale.price
+
+
+
+    return f"""Статистика аккаунта <b><i>{account.username}</i></b>
+
+<b>ID:</b> <code>{account.id}</code>
+<b>Баланс:</b> <code>{balance} {currency}</code>
+<b>Незавершенных заказов:</b> <code>{account.active_sales}</code>
+
+<b>Доступно для вывода</b>
+<b>Сейчас:</b> <code>{canWithdraw["now"].split('.')[0]} {currency}</code>
+<b>Через час:</b> <code>+{"{:.1f}".format(canWithdraw["hour"])} {currency}</code>
+<b>Через день:</b> <code>+{"{:.1f}".format(canWithdraw["day"])} {currency}</code>
+<b>Через 2 дня:</b> <code>+{"{:.1f}".format(canWithdraw["2day"])} {currency}</code>
+
+<b>Товаров продано</b>
+<b>За день:</b> <code>{sales["day"]} ({"{:.1f}".format(salesPrice["day"])} {currency})</code>
+<b>За неделю:</b> <code>{sales["week"]} ({"{:.1f}".format(salesPrice["week"])} {currency})</code>
+<b>За месяц:</b> <code>{sales["month"]} ({"{:.1f}".format(salesPrice["month"])} {currency})</code>
+<b>За всё время:</b> <code>{sales["all"]} ({"{:.1f}".format(salesPrice["all"])} {currency})</code>
+
+<b>Товаров возвращено</b>
+<b>За день:</b> <code>{refunds["day"]} ({"{:.1f}".format(refundsPrice["day"])} {currency})</code>
+<b>За неделю:</b> <code>{refunds["week"]} ({"{:.1f}".format(refundsPrice["week"])} {currency})</code>
+<b>За месяц:</b> <code>{refunds["month"]} ({"{:.1f}".format(refundsPrice["month"])} {currency})</code>
+<b>За всё время:</b> <code>{refunds["all"]} ({"{:.1f}".format(refundsPrice["all"])} {currency})</code>
+
+<i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
+
+def get_orders(acc: Account, start_from: str) -> tuple[str | None, list[str]]:
+    """
+    Получает список ордеров на аккаунте.
+    :return: Список с заказами.
+    """
+    attempts = 3
+    while attempts:
+        try:
+            result = acc.get_sells(start_from=start_from or None, state="paid")
+            break
+        except:
+            attempts -= 1
+            time.sleep(1)
+    else:
+        raise Exception
+    orders = result[1]
+    old_orders = []
+    for i in orders:
+        parser = BeautifulSoup(i.html, "html.parser")
+        time_text = parser.find("div", {"class": "tc-date-left"}).text
+        if any(map(time_text.__contains__, ["сек", "мин", "час", "тол"])):
+            continue
+        old_orders.append(parser.find("div", {"class": "tc-order"}).text)
+    return result[0], old_orders
+
+def get_all_old_orders(acc: Account) -> list[str]:
+    """
+    Получает список все старых ордеров на аккаунте.
+    :param acc: экземпляр аккаунта.
+    :return: список старых заказов.
+    """
+    start_from = ""
+    old_orders = []
+    while start_from is not None:
+        result = get_orders(acc, start_from)
+        start_from = result[0]
+        old_orders.extend(result[1])
+        time.sleep(1)
+    return old_orders
 
 def generate_lot_info_text(lot_obj: configparser.SectionProxy) -> str:
     """

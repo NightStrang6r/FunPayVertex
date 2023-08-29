@@ -6,22 +6,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vertex import Vertex
-
 import re
 import os
-import sys
 import time
 import random
 import string
 import psutil
 import telebot
 import logging
-
-from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand
+import json
+from os.path import exists
+from telebot.types import InlineKeyboardMarkup as K, InlineKeyboardButton as B, Message, CallbackQuery, BotCommand, ReplyKeyboardRemove
 from tg_bot import utils, static_keyboards as skb, keyboards as kb, CBT
 from Utils import vertex_tools
+import tg_bot.CBT
 from locales.localizer import Localizer
-
 
 logger = logging.getLogger("TGBot")
 localizer = Localizer()
@@ -74,9 +73,10 @@ class TGBot:
             "logs": _("cmd_logs"),
             "del_logs": _("cmd_del_logs"),
             "about": _("cmd_about"),
-            "check_updates": _("cmd_check_updates"),
-            "update": _("cmd_update"),
             "sys": _("cmd_sys"),
+            "old_orders": _("cmd_old_orders"),
+            "keyboard": _("cmd_keyboard"),
+            "change_cookie": _("cmd_change_cookie"),
             "restart": _("cmd_restart"),
             "power_off": _("cmd_power_off")
         }
@@ -299,29 +299,102 @@ class TGBot:
         """
         Отправляет основное меню настроек (новым сообщением).
         """
+        self.vertex.account.get()
+        self.vertex.balance = self.vertex.get_balance()
         self.bot.send_message(m.chat.id, _("desc_main"), reply_markup=kb.settings_sections(self.vertex))
 
     def send_profile(self, m: Message):
         """
         Отправляет статистику аккаунта.
         """
-        self.bot.send_message(m.chat.id, utils.generate_profile_text(self.vertex),
-                              reply_markup=skb.REFRESH_BTN())
-
+        new_msg = self.bot.send_message(m.chat.id, _("updating_profile"))
+        try:
+            self.vertex.account.get()
+            self.vertex.balance = self.vertex.get_balance()
+            self.bot.send_message(m.chat.id, utils.generate_profile_text(self.vertex),
+                                  reply_markup=telebot.types.InlineKeyboardMarkup()
+                                  .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_profile"))
+                                  .add(telebot.types.InlineKeyboardButton("▶️ Еще", callback_data="update_adv_profile"))
+                                  )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
+        except:
+            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            self.bot.answer_callback_query(m.id)
+            return
+        
     def update_profile(self, c: CallbackQuery):
+        """
+        Обновляет статистику аккаунта.
+        """
         new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
         try:
             self.vertex.account.get()
             self.vertex.balance = self.vertex.get_balance()
+            self.bot.edit_message_text(utils.generate_profile_text(self.vertex), c.message.chat.id,
+                                c.message.id,
+                                reply_markup=telebot.types.InlineKeyboardMarkup()
+                                .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_profile"))
+                                .add(telebot.types.InlineKeyboardButton("▶️ Еще", callback_data="update_adv_profile"))
+                                )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
         except:
             self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
             logger.debug("TRACEBACK", exc_info=True)
             self.bot.answer_callback_query(c.id)
             return
 
-        self.bot.delete_message(new_msg.chat.id, new_msg.id)
-        self.bot.edit_message_text(utils.generate_profile_text(self.vertex), c.message.chat.id,
-                                   c.message.id, reply_markup=skb.REFRESH_BTN())
+    def change_cookie(self, m: telebot.types.Message):
+        if len(m.text.split(" ")) == 2:
+            if len(m.text.split(" ")[1]) != 32:
+                self.bot.send_message(m.chat.id, "Неверный формат токена. Попробуй еще раз!")
+                return
+            self.vertex.account.golden_key = m.text.split(" ")[1]
+            self.vertex.MAIN_CFG.set("FunPay", "golden_key", m.text.split(" ")[1])
+            self.vertex.save_config(self.vertex.MAIN_CFG, "configs/_main.cfg")
+            self.vertex.account.get(True)
+            self.bot.send_message(m.chat.id, "✅ Успешно изменено перезапустите бота.")
+        else:
+            self.bot.send_message(m.chat.id, "Команда введена не правильно! /change_cookie [golden_key]")
+
+    def update_adv_profile(self, c: CallbackQuery):
+        """
+        Обновляет дополнительную статистику аккаунта.
+        """
+        new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
+        try:
+            self.vertex.account.get()
+            self.vertex.balance = self.vertex.get_balance()
+            self.bot.edit_message_text(utils.generate_adv_profile(self.vertex), c.message.chat.id,
+                                c.message.id,
+                                reply_markup=telebot.types.InlineKeyboardMarkup()
+                                .add(telebot.types.InlineKeyboardButton("🔄 Обновить", callback_data="update_adv_profile"))
+                                .add(telebot.types.InlineKeyboardButton("◀️ Назад", callback_data="update_profile"))
+                                )
+            self.bot.delete_message(new_msg.chat.id, new_msg.id)
+        except:
+            self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            self.bot.answer_callback_query(c.id)
+            return
+
+    def send_orders(self, m: telebot.types.Message):
+        new_mes = self.bot.send_message(m.chat.id, "Сканирую заказы (это может занять какое-то время)...")
+        try:
+            orders = utils.get_all_old_orders(self.vertex.account)
+        except:
+            self.bot.edit_message_text("❌ Не удалось получить список заказов.", new_mes.chat.id, new_mes.id)
+            logger.debug("TRACEBACK", exc_info=True)
+            return
+
+        if not orders:
+                self.bot.edit_message_text("❌ Просроченных заказов нет.", new_mes.chat.id, new_mes.id)
+                logger.debug("TRACEBACK", exc_info=True)
+                return
+
+        orders_text = ", ".join(orders)
+        text = f"Здравствуйте!\n\nПрошу подтвердить выполнение следующих заказов:\n{orders_text}\n\nЗаранее благодарю,\nС уважением."
+        self.bot.edit_message_text(f"<code>{utils.escape(text)}</code>", new_mes.chat.id, new_mes.id)
 
     def act_manual_delivery_test(self, m: Message):
         """
@@ -453,52 +526,6 @@ class TGBot:
         Отправляет информацию о текущей версии бота.
         """
         self.bot.send_message(m.chat.id, _("about", self.vertex.VERSION))
-
-#    def check_updates(self, m: Message):
-#        curr_tag = f"v{self.vertex.VERSION}"
-#        release = updater.get_new_release(curr_tag)
-#        if isinstance(release, int):
-#            errors = {
-#                1: ["update_no_tags", ()],
-#                2: ["update_lasted", (curr_tag,)],
-#                3: ["update_get_error", ()],
-#            }
-#            self.bot.send_message(m.chat.id, _(errors[release][0], *errors[release][1]))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_available", release.name, release.description))
-#        self.bot.send_message(m.chat.id, _("update_update"))
-#
-#    def update(self, m: Message):
-#        curr_tag = f"v{self.vertex.VERSION}"
-#        release = updater.get_new_release(curr_tag)
-#        if isinstance(release, int):
-#            errors = {
-#                1: ["update_no_tags", ()],
-#                2: ["update_lasted", (curr_tag,)],
-#                3: ["update_get_error", ()],
-#            }
-#            self.bot.send_message(m.chat.id, _(errors[release][0], *errors[release][1]))
-#            return
-#
-#        if updater.create_backup():
-#            self.bot.send_message(m.chat.id, _("update_backup_error"))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_backup_created"))
-#
-#        if updater.download_zip(release.exe_link if getattr(sys, "frozen", False) else release.sources_link) \
-#                or (release_folder := updater.extract_update_archive()) == 1:
-#            self.bot.send_message(m.chat.id, _("update_download_error"))
-#            return
-#        self.bot.send_message(m.chat.id, _("update_downloaded"))
-#
-#        if updater.install_release(release_folder):
-#            self.bot.send_message(m.chat.id, _("update_install_error"))
-#            return
-#
-#        if getattr(sys, 'frozen', False):
-#            self.bot.send_message(m.chat.id, _("update_done_exe"))
-#        else:
-#            self.bot.send_message(m.chat.id, _("update_done"))
 
     def send_system_info(self, m: Message):
         """
@@ -895,6 +922,12 @@ class TGBot:
                                                  "Thank you :)", show_alert=True)
         self.open_cp(c)
 
+    def open_keyboard(self, m: Message):
+        self.bot.send_message(m.chat.id, "Клавиатура появилась!", reply_markup=skb.OLD_KEYBOARD)
+    
+    def close_keyboard(self, m: Message):
+        self.bot.send_message(m.chat.id, "Клавиатура скрыта!", reply_markup=ReplyKeyboardRemove())
+    
     def __register_handlers(self):
         """
         Регистрирует хэндлеры всех команд.
@@ -906,7 +939,11 @@ class TGBot:
         self.msg_handler(self.run_file_handlers, content_types=["photo", "document"], func=lambda m: self.is_file_handler(m))
 
         self.msg_handler(self.send_settings_menu, commands=["menu"])
+        self.cbq_handler(self.update_profile, lambda c: c.data == "update_profile")
+        self.cbq_handler(self.update_adv_profile, lambda c: c.data == "update_adv_profile")
         self.msg_handler(self.send_profile, commands=["profile"])
+        self.msg_handler(self.send_orders, commands=["old_orders"])
+        self.msg_handler(self.change_cookie, commands=["change_cookie"])
         self.cbq_handler(self.update_profile, lambda c: c.data == CBT.UPDATE_PROFILE)
         self.msg_handler(self.act_manual_delivery_test, commands=["test_lot"])
         self.msg_handler(self.act_upload_image, commands=["upload_img"])
@@ -932,14 +969,18 @@ class TGBot:
         self.msg_handler(self.send_logs, commands=["logs"])
         self.msg_handler(self.del_logs, commands=["del_logs"])
         self.msg_handler(self.about, commands=["about"])
-        #self.msg_handler(self.check_updates, commands=["check_updates"])
-        #self.msg_handler(self.update, commands=["update"])
         self.msg_handler(self.send_system_info, commands=["sys"])
         self.msg_handler(self.restart_vertex, commands=["restart"])
         self.msg_handler(self.ask_power_off, commands=["power_off"])
-        #self.msg_handler(self.send_announcements_kb, commands=["announcements"])
         self.cbq_handler(self.send_review_reply_text, lambda c: c.data.startswith(f"{CBT.SEND_REVIEW_REPLY_TEXT}:"))
 
+        self.msg_handler(self.send_logs, func=lambda m: m.text == "📋 Логи 📋")
+        self.msg_handler(self.send_settings_menu, func=lambda m: m.text == "⚙️ Настройки ⚙️")
+        self.msg_handler(self.send_system_info, func=lambda m: m.text == "📈 Система 📈")
+        self.msg_handler(self.restart_vertex, func=lambda m: m.text == "🔄 Перезапуск 🔄")
+        self.msg_handler(self.close_keyboard, func=lambda m: m.text == "❌ Закрыть ❌")
+        self.msg_handler(self.ask_power_off, func=lambda m: m.text == "🔌 Отключение 🔌")
+        self.msg_handler(self.open_keyboard, commands=["keyboard"])
         self.cbq_handler(self.act_send_funpay_message, lambda c: c.data.startswith(f"{CBT.SEND_FP_MESSAGE}:"))
         self.cbq_handler(self.open_reply_menu, lambda c: c.data.startswith(f"{CBT.BACK_TO_REPLY_KB}:"))
         self.cbq_handler(self.extend_new_message_notification, lambda c: c.data.startswith(f"{CBT.EXTEND_CHAT}:"))

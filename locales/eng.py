@@ -123,13 +123,6 @@ mv_only_my_msg = "{} Notify, if only my messages"
 mv_only_fp_msg = "{} Notify, if only FunPay messages"
 mv_only_bot_msg = "{} Notify, if only bot messages"
 
-# Plugins
-pl_add = "➕ Add plugin"
-pl_activate = "Activate"
-pl_deactivate = "Deactivate"
-pl_commands = "⌨️ Commands"
-pl_settings = "⚙️ Settings"
-
 # Configs
 cfg_download_main = "⤵️ Download main config"
 cfg_download_ar = "⤵️ Download autoresponse config"
@@ -137,10 +130,6 @@ cfg_download_ad = "⤵️ Download auto-delivery config"
 cfg_upload_main = "⤴️ Upload main config"
 cfg_upload_ar = "⤴️ Upload autoresponse config"
 cfg_upload_ad = "⤴️ Upload auto-delivery config"
-
-# Announcements
-an_an = "{} Announcements"
-an_ad = "{} Advertisement"
 
 
 # New order
@@ -351,12 +340,6 @@ tmplt_already_exists_err = "❌ Such a template already exists."
 tmplt_added = "✅ Template added."
 tmplt_msg_sent = "✅ Message sent to <a href=\"https://funpay.com/chat/?node={}\">{}</a> chat.\n\n<code>{}</code>"
 
-pl_not_found_err = "❌ Plugin with UUID <code>{}</code> not found."
-pl_file_not_found_err = "❌  File <code>{}</code> not found.\nRestart <i>FPV</i> with command /restart."
-pl_commands_list = "<b><i>{}</i></b> plugin commands list."
-pl_author = "Dev"
-pl_new = "Send me a plugin."
-
 # - Menus desc
 desc_main = "Select a settings category."
 desc_gs = "Here you can turn the basic <i>FPV</i> functions on and off."
@@ -381,9 +364,6 @@ desc_or = "Here you can configure your response to feedback."
 desc_an = "Here you can configure notifications about announcements."
 desc_cfg = "Hare you can download and upload configs."
 desc_tmplt = "Here you can add and delete answer templates."
-desc_pl = "Here you can get information about the plugins, as well as configure them.\n\n"\
-          "⚠️ <b><u>After activating / deactivating / adding / removing a plugin, you must restart the bot!</u></b>" \
-          " (/restart)"
 
 # - Commands desc
 cmd_menu = "open settings"
@@ -398,11 +378,13 @@ cmd_watermark = "change message watermark"
 cmd_logs = "download current log-file"
 cmd_del_logs = "delete old log-files"
 cmd_about = "about current version"
-cmd_check_updates = "check for updates"
-cmd_update = "upgrade to the next version"
+cmd_old_orders = "sends a list of open orders that are more than 24 hours old"
 cmd_sys = "system load information"
+cmd_keyboard = "open keyboard"
+cmd_change_cookie = "change golden_key cookie"
 cmd_restart = "restart FPV"
 cmd_power_off = "shutdown FPV"
+
 
 # - Variables desc
 v_edit_greeting_text = "Enter the text of the welcome message."
@@ -478,10 +460,6 @@ log_ar_cmd_deleted = "$MAGENTA@{} (ID: {})$RESET deleted the command $YELLOW{}$R
 log_cfg_downloaded = "$MAGENTA@{} (ID: {})$RESET requested config $YELLOW{}$RESET."
 log_tmplt_added = "$MAGENTA@{} (ID: {})$RESET added the answer template $YELLOW\"{}\"$RESET."
 log_tmplt_deleted = "$MAGENTA@{} (ID: {})$RESET deleted the answer template $YELLOW\"{}\"$RESET."
-log_pl_activated = "$MAGENTA@{} (ID: {})$RESET activated the plugin $YELLOW\"{}\"$RESET."
-log_pl_deactivated = "$MAGENTA@{} (ID: {})$RESET deactivated the plugin $YELLOW\"{}\"$RESET."
-log_pl_deleted = "$MAGENTA@{} (ID: {})$RESET deleted the plugin $YELLOW\"{}\"$RESET."
-log_pl_delete_handler_err = "An error occurred when executing the $YELLOW\"{}\"$RESET plugin removal handler."
 
 # handlers.py logs
 log_new_msg = "$MAGENTA┌──$RESET New message in chat with $YELLOW{} (CID: {}):"
