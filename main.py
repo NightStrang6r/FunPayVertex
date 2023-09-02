@@ -22,7 +22,7 @@ def check_and_install_libraries(libraries):
                     print(f'Не удалось установить {library}. Пожалуйста, установите его вручную.')
 
 # Список библиотек, которые вы хотите проверить и установить при необходимости
-required_libraries = ['requests', 'telebot', 'colorama', 'requests_toolbelt', 'psutil', 'beautifulsoup4', 'pytelegrambotapi', 'aiohttp']
+required_libraries = ['requests', 'telebot', 'colorama', 'requests_toolbelt', 'psutil', 'bs4', 'aiohttp']
 
 check_and_install_libraries(required_libraries)
 
