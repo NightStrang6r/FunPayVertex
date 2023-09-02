@@ -1,3 +1,32 @@
+import os
+import subprocess
+
+def check_and_install_libraries(libraries):
+    missing_libraries = []
+    for library in libraries:
+        try:
+            __import__(library)
+        except ImportError:
+            missing_libraries.append(library)
+
+    if missing_libraries:
+        print(f'Отсутствующие библиотеки: {missing_libraries}')
+        choice = input('Хотите установить их? (y/n): ')
+        if choice.lower() == 'y':
+            for library in missing_libraries:
+                install_command = f'pip install {library}'
+                subprocess.call(install_command, shell=True)
+                try:
+                    __import__(library)
+                except ImportError:
+                    print(f'Не удалось установить {library}. Пожалуйста, установите его вручную.')
+
+# Список библиотек, которые вы хотите проверить и установить при необходимости
+required_libraries = ['requests', 'telebot', 'colorama', 'requests_toolbelt', 'psutil', 'beautifulsoup4', 'pytelegrambotapi', 'aiohttp']
+
+check_and_install_libraries(required_libraries)
+
+# Теперь можно импортировать остальные модули и продолжить выполнение скрипта
 import Utils.config_loader as cfg_loader
 from first_setup import first_setup
 from colorama import Fore, Style
