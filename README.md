@@ -115,4 +115,3 @@
 
 - [Monobank](https://send.monobank.ua/jar/7fiVkcrWYv)
 - [DonationAlerts](https://www.donationalerts.com/r/nightstranger)
-- [ЮMoney](https://yoomoney.ru/to/4100115656349483)
