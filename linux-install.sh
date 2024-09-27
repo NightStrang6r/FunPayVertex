@@ -53,10 +53,7 @@ git clone https://github.com/NightStrang6r/FunPayVertex
 echo -e "${GREEN}Переход в директорию проекта...${NC}"
 cd FunPayVertex
 
-echo -e "${GREEN}Установка зависимостей бота...${NC}"
-sudo python3.11 setup.py
-
-echo -e "${GREEN}Сейчас необходимо выполнить первичную установку${NC}"
+echo -e "${GREEN}Установка зависимостей и первичная установка${NC}"
 sudo python3.11 main.py
 
 echo -e "${GREEN}Ок, теперь добавим бота как фоновый процесс${NC}"
