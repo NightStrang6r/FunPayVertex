@@ -5,7 +5,7 @@
     <img src="https://i.ibb.co/Sc5mL1G/Screenshot-141.png">
 </h>
 
-<h2 align="center">Перед началом настоятельно рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат</a> и <a href="https://dsc.gg/funpay">Discord сервер</a>. Тут и поможем чем сможем и посидеть можно.</h2>
+<h2 align="center">Перед началом настоятельно рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат</a>. Тут и поможем чем сможем и посидеть можно.</h2>
 
 ## :clipboard: **Содержание**
 
