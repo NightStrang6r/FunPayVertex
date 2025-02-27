@@ -26,6 +26,7 @@ localizer = Localizer()
 _ = localizer.translate
 import Utils.vertex_tools
 from tg_bot import CBT
+import re
 
 
 class NotificationTypes:
@@ -252,6 +253,10 @@ def message_hook(vertex: Vertex, event: NewMessageEvent):
         with open("storage/cache/advProfileStat.json", "w", encoding="UTF-8") as f:
             f.write(json.dumps(ORDER_CONFIRMED, indent=4, ensure_ascii=False))
 
+def extract_float(text):
+    cleaned_text = re.sub(r'[^\d.,]', '', text)
+    cleaned_text = cleaned_text.replace(',', '')
+    return float(cleaned_text)
 
 def get_sales(account: Account, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
               include_refunded: bool = True, exclude_ids: list[str] | None = None,
@@ -303,7 +308,7 @@ def get_sales(account: Account, start_from: str | None = None, include_paid: boo
             continue
 
         description = div.find("div", {"class": "order-desc"}).find("div").text
-        price = float(div.find("div", {"class": "tc-price"}).text.split(" ")[0])
+        price = float(extract_float(div.find("div", {"class": "tc-price"}).text))
 
         buyer_div = div.find("div", {"class": "media-user-name"}).find("span")
         buyer_username = buyer_div.text
