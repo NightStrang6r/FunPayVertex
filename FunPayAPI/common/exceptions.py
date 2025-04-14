@@ -166,3 +166,23 @@ class RefundError(RequestFailedError):
     def short_str(self):
         return f"Не удалось вернуть средства по заказу {self.order_id}" \
                f"{f': {self.error_message}' if self.error_message else '.'}"
+
+
+class CalculateError(RequestFailedError):
+    """
+    Исключение, которое возбуждается, если при исполнении calculate запроса произошла ошибка.
+    """
+    def __init__(self, response: requests.Response, error_message: str  | None,
+                 subcategory_id: int, subcategory_type: types.SubCategoryTypes, price: int | float):
+        super(CalculateError, self).__init__(response)
+        self.error_message = error_message
+        self.subcategory_id = subcategory_id
+        self.subcategory_type = subcategory_type
+        self.price = price
+        if not self.error_message:
+            self.log_response = True
+
+    def short_str(self):
+        return f"Не удалось рассчитать стоимость в категории {self.subcategory_id} типа {self.subcategory_type.name}" \
+               f"{f': {self.error_message}' if self.error_message else '.'}"
+

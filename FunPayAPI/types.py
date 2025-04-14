@@ -3,7 +3,7 @@
 """
 from __future__ import annotations
 from typing import Literal, overload, Optional
-from .common.utils import RegularExpressions
+from .common.utils import RegularExpressions, get_currency_code
 from .common.enums import MessageTypes, OrderStatuses, SubCategoryTypes
 import datetime
 
@@ -60,6 +60,9 @@ class ChatShortcut:
         res = RegularExpressions()
         if self.last_message_text == res.DISCORD:
             return MessageTypes.DISCORD
+        
+        if self.last_message_text == res.SCAM_WARNING:
+            return MessageTypes.SCAM_WARNING
 
         if res.ORDER_PURCHASED.findall(self.last_message_text) and res.ORDER_PURCHASED2.findall(self.last_message_text):
             return MessageTypes.ORDER_PURCHASED
@@ -79,7 +82,8 @@ class ChatShortcut:
             MessageTypes.FEEDBACK_ANSWER_DELETED: res.FEEDBACK_ANSWER_DELETED,
             MessageTypes.ORDER_CONFIRMED_BY_ADMIN: res.ORDER_CONFIRMED_BY_ADMIN,
             MessageTypes.PARTIAL_REFUND: res.PARTIAL_REFUND,
-            MessageTypes.ORDER_REOPENED: res.ORDER_REOPENED
+            MessageTypes.ORDER_REOPENED: res.ORDER_REOPENED,
+            MessageTypes.REFUND_BY_ADMIN: res.REFUND_BY_ADMIN
         }
 
         for i in sys_msg_types:
@@ -205,6 +209,9 @@ class Message:
         res = RegularExpressions()
         if self.text == res.DISCORD:
             return MessageTypes.DISCORD
+        
+        if self.text == res.SCAM_WARNING:
+            return MessageTypes.SCAM_WARNING
 
         if res.ORDER_PURCHASED.findall(self.text) and res.ORDER_PURCHASED2.findall(self.text):
             return MessageTypes.ORDER_PURCHASED
@@ -224,7 +231,8 @@ class Message:
             MessageTypes.FEEDBACK_ANSWER_DELETED: res.FEEDBACK_ANSWER_DELETED,
             MessageTypes.ORDER_CONFIRMED_BY_ADMIN: res.ORDER_CONFIRMED_BY_ADMIN,
             MessageTypes.PARTIAL_REFUND: res.PARTIAL_REFUND,
-            MessageTypes.ORDER_REOPENED: res.ORDER_REOPENED
+            MessageTypes.ORDER_REOPENED: res.ORDER_REOPENED,
+            MessageTypes.REFUND_BY_ADMIN: res.REFUND_BY_ADMIN
         }
 
         for i in sys_msg_types:
@@ -250,6 +258,9 @@ class OrderShortcut:
     :param price: цена заказа.
     :type price: :obj:`float`
 
+    :param currency: валюта заказа.
+    :type currency: :obj:`str`
+
     :param buyer_username: никнейм покупателя.
     :type buyer_username: :obj:`str`
 
@@ -271,7 +282,7 @@ class OrderShortcut:
     :param dont_search_amount: не искать кол-во товара.
     :type dont_search_amount: :obj:`bool`, опционально
     """
-    def __init__(self, id_: str, description: str, price: float,
+    def __init__(self, id_: str, description: str, price: float, currency: Literal["RUB", "USD", "EUR"],
                  buyer_username: str, buyer_id: int, status: OrderStatuses,
                  date: datetime.datetime, subcategory_name: str, html: str, dont_search_amount: bool = False):
         self.id: str = id_ if not id_.startswith("#") else id_[1:]
@@ -280,6 +291,8 @@ class OrderShortcut:
         """Описание заказа."""
         self.price: float = price
         """Цена заказа."""
+        self.currency: Literal["RUB", "USD", "EUR"] = currency
+        """Валюта заказа."""
         self.amount: int | None = self.parse_amount() if not dont_search_amount else None
         """Кол-во товаров."""
         self.buyer_username: str = buyer_username
@@ -305,7 +318,7 @@ class OrderShortcut:
         res = RegularExpressions()
         result = res.PRODUCTS_AMOUNT.findall(self.description)
         if result:
-            return int(result[0].split(" ")[0])
+            return int("".join(result[0].split(" ")[:-1]))
         return 1
 
     def __str__(self):
@@ -321,6 +334,9 @@ class Order:
 
     :param status: статус заказа.
     :type status: :class:`FunPayAPI.common.enums.OrderStatuses`
+    
+    :param amount: кол-во товаров.
+    :type amount: :obj:`int`
 
     :param subcategory: подкатегория, к которой относится заказ.
     :type subcategory: :class:`FunPayAPI.types.SubCategory`
@@ -349,18 +365,25 @@ class Order:
     :param html: HTML код заказа.
     :type html: :obj:`str`
 
+    :param fields: поля заказа.
+    :type fields: :obj:`dict`
+
+    :param delivered_products: список товаров, которые были доставлены.
+    :type delivered_products: :obj:`list` of :obj:`str`
+
     :param review: объект отзыва на заказ.
     :type review: :class:`FunPayAPI.types.Review` or :obj:`None`
     """
-    def __init__(self, id_: str, status: OrderStatuses, subcategory: SubCategory, short_description: str | None,
-                 full_description: str | None, sum_: float,
-                 buyer_id: int, buyer_username: str,
-                 seller_id: int, seller_username: str,
-                 html: str, review: Review | None):
+    def __init__(self, id_: str, status: OrderStatuses, amount: int, subcategory: SubCategory,
+                 short_description: str | None, full_description: str | None, sum_: float,
+                 buyer_id: int, buyer_username: str, seller_id: int, seller_username: str,
+                 html: str, fields: dict, review: Review | None, delivered_products: list[str] | None = None):
         self.id: str = id_ if not id_.startswith("#") else id_[1:]
         """ID заказа."""
         self.status: OrderStatuses = status
         """Статус заказа."""
+        self.amount: int = amount
+        """Количество товара"""
         self.subcategory: SubCategory = subcategory
         """Подкатегория, к которой относится заказ."""
         self.short_description: str | None = short_description
@@ -381,6 +404,10 @@ class Order:
         """Никнейм продавца."""
         self.html: str = html
         """HTML код заказа."""
+        self.fields: dict = fields
+        """Поля заказа."""
+        self.delivered_products: list[str] = delivered_products or []
+        """Список товаров, которые были доставлены."""
         self.review: Review | None = review
         """Объект отзыва заказа."""
 
@@ -501,7 +528,9 @@ class LotFields:
     :param fields: словарь с полями.
     :type fields: :obj:`dict`
     """
-    def __init__(self, lot_id: int, fields: dict):
+    def __init__(self, lot_id: int, prices: dict[str, dict[str, str | int]],
+                 table_price: float, commission_percent: float, currency: Literal['RUB', 'USD', 'EUR'],
+                 fields: dict):
         self.lot_id: int = lot_id
         """ID лота."""
         self.__fields: dict = fields
@@ -523,6 +552,14 @@ class LotFields:
         """Активен ли лот."""
         self.deactivate_after_sale: bool = "deactivate_after_sale[]" in self.__fields
         """Деактивировать ли лот после продажи."""
+        self.prices: dict[str, dict[str, str | int]] = prices
+        """Цены с комиссией, по способам оплаты."""
+        self.table_price: float = table_price
+        """Цена из таблицы лотов."""
+        self.commission_percent: float = commission_percent
+        """Процент комиссии."""
+        self.currency: Literal['RUB', 'USD', 'EUR']  = currency
+        """Валюта"""
 
     @property
     def fields(self) -> dict[str, str]:
@@ -533,6 +570,13 @@ class LotFields:
         :rtype: :obj:`dict` {:obj:`str`: :obj:`str`}
         """
         return self.__fields
+    
+    @fields.setter
+    def fields(self, new_fields: dict[str, str]) -> None:
+        """"
+        Сохраняет все поля лота
+        """
+        self.__fields.update(new_fields)
 
     def edit_fields(self, fields: dict[str, str]):
         """
@@ -589,14 +633,34 @@ class LotShortcut:
     :param price: цена лота.
     :type price: :obj:`float`
 
+    :param currency: валюта лота.
+    :type currency: :obj:`str` or :obj:`None`
+
     :param subcategory: подкатегория лота.
     :type subcategory: :class:`FunPayAPI.types.SubCategory`
+
+    :param my_lot: мой ли лот?
+    :type my_lot: :obj:`bool`
+
+    :param seller: объект продавца.
+    :type seller: :class:`FunPayAPI.types.SellerShortcut` or :obj:`None`
+
+    :param amount: кол-во товара.
+    :type amount: :obj:`int` or :obj:`None`
+
+    :param auto_delivery: автоматическая доставка.
+    :type auto_delivery: :obj:`bool`
+
+    :param promo: промо-лот.
+    :type promo: :obj:`bool`
 
     :param html: HTML код виджета лота.
     :type html: :obj:`str`
     """
-    def __init__(self, id_: int | str, server: str | None,
-                 description: str | None, price: float, subcategory: SubCategory, html: str):
+    def __init__(self, id_: int | str, server: str | None, description: str | None,
+                 price: float, currency: Literal["RUB", "USD", "EUR"] | None, subcategory: SubCategory,
+                 my_lot: bool, seller: SellerShortcut | None, amount: int | None,
+                 auto_delivery: bool, promo: bool, html: str):
         self.id: int | str = id_
         if isinstance(self.id, str) and self.id.isnumeric():
             self.id = int(self.id)
@@ -609,13 +673,123 @@ class LotShortcut:
         """Краткое описание (название) лота."""
         self.price: float = price
         """Цена лота."""
+        self.currency: Literal["RUB", "USD", "EUR"] | None = currency
+        """Валюта лота."""
         self.subcategory: SubCategory = subcategory
         """Подкатегория лота."""
+        self.my_lot: bool = my_lot
+        """Мой ли лот?"""
+        self.seller: SellerShortcut | None = seller
+        """Продавец лота."""
+        self.amount: int | None = amount
+        """Кол-во товара."""
+        self.auto_delivery: bool = auto_delivery
+        """Автоматическая доставка."""
+        self.promo: bool = promo
+        """Промо-лот."""
         self.html: str = html
         """HTML-код виджета лота."""
         self.public_link: str = f"https://funpay.com/chips/offer?id={self.id}" \
             if self.subcategory.type is SubCategoryTypes.CURRENCY else f"https://funpay.com/lots/offer?id={self.id}"
         """Публичная ссылка на лот."""
+
+
+class SellerShortcut:
+    """
+    Данный класс представляет виджет продавца из таблицы предложений.
+    
+    :param username: никнейм продавца.
+    :type username: :obj:`str`
+    
+    :param seller_id: ID продавца.
+    :type seller_id: :obj:`int`
+
+    :param seller_online: онлайн ли продавец.
+    :type seller_online: :obj:`bool`
+    
+    :param avatar_link: ссылка на аватарку продавца.
+    :type avatar_link: :obj:`str`
+    
+    :param stars_amount: кол-во звезд продавца.
+    :type stars_amount: :obj:`int`
+    
+    :param reviews_amount: кол-во отзывов продавца.
+    :type reviews_amount: :obj:`int`
+
+    :param html: HTML код виджета продавца.
+    :type html: :obj:`str`
+    """
+    def __init__(self, username: str, seller_id: int, seller_online: bool,
+                 avatar_link: str, stars_amount: int,
+                 reviews_amount: int, html: str) -> None:
+        self.username: str = username
+        """Никнейм продавца."""
+        self.seller_id: int = seller_id
+        """ID продавца."""
+        self.seller_online: bool = seller_online
+        """Онлайн ли продавец."""
+        self.avatar_link: str = avatar_link
+        """Ссылка на аватарку продавца."""
+        self.stars_amount: int = stars_amount
+        """Кол-во звезд продавца."""
+        self.reviews_amount: int = reviews_amount
+        """Кол-во отзывов продавца."""
+        self.html: str = html
+        """HTML код виджета продавца."""
+
+    @property
+    def seller_link(self) -> str:
+        return f"https://funpay.com/users/{self.seller_id}/"
+
+
+
+class MyLotShortcut:
+    """
+    Данный класс представляет виджет лота со странички своих предложений в категории.
+
+    :param id_: ID лота.
+    :type id_: :obj:`int` or :obj:`str`
+
+    :param description: краткое описание (название) лота.
+    :type description: :obj:`str` or :obj:`None`
+
+    :param price: цена лота.
+    :type price: :obj:`float`
+    
+    :param is_active: активный ли лот.
+    :type is_active: :obj:`bool`
+
+    :param auto_delivery: автоматическая доставка.
+    :type auto_delivery: :obj:`bool`
+
+    :param server: название сервера (если указан в лоте).
+    :type server: :obj:`str` or :obj:`None`
+
+    :param amount: кол-во товара.
+    :type amount: :obj:`int` or :obj:`None`
+
+    :param html: HTML код виджета лота.
+    :type html: :obj:`str`
+    """
+    def __init__(self, id_: int, description: str, price: float, is_active: bool,
+                 auto_delivery: bool, server: str | None, amount: int | None, html: str) -> None:
+        self.id: int = id_
+        """ID лота."""
+        self.description: str = description
+        """Название лота."""
+        self.price: float = price
+        """Цена лота."""
+        self.is_active: bool = is_active
+        """Активен ли лот?"""
+        self.auto_delivery: bool = auto_delivery
+        """Автоматическая доставка."""
+        self.server: str | None = server
+        """Название сервера (если указан)."""
+        self.amount: int | None = amount
+        """Кол-во товара."""
+        self.html: str = html
+        """HTML-код виджета лота."""
+
 
 
 class UserProfile:
@@ -637,10 +811,17 @@ class UserProfile:
     :param banned: заблокирован ли пользователь?
     :type banned: :obj:`bool`
 
+    :param rating: кол-во звезд пользователя.
+    :type rating: :obj:`int` or :obj:`None`
+
+    :param reviews_amount: кол-во отзывов пользователя.
+    :type reviews_amount: :obj:`int`
+
     :param html: HTML код страницы пользователя.
     :type html: :obj:`str`
     """
-    def __init__(self, id_: int, username: str, profile_photo: str, online: bool, banned: bool, html: str):
+    def __init__(self, id_: int, username: str, profile_photo: str, online: bool,
+                 banned: bool, rating: float | None, reviews_amount: int, html: str):
         self.id: int = id_
         """ID пользователя."""
         self.username: str = username
@@ -651,6 +832,10 @@ class UserProfile:
         """Онлайн ли пользователь."""
         self.banned: bool = banned
         """Заблокирован ли пользователь."""
+        self.rating: float | None = rating
+        """Кол-во звезд пользователя."""
+        self.reviews_amount: int = reviews_amount
+        """Кол-во отзывов пользователя."""
         self.html: str = html
         """HTML код страницы пользователя."""
         self.__lots: list[LotShortcut] = []
@@ -841,3 +1026,131 @@ class Balance:
         """Общий евро баланс."""
         self.available_eur: float = available_eur
         """Доступный к выводу евро баланс."""
+
+
+class LotPage:
+    """
+    Данный класс представляет информацию со страницы лота.
+
+    :param lot_id: ID лота.
+    :type lot_id: :obj:`int`
+
+    :param subcategory_id: ID подкатегории.
+    :type subcategory_id: :obj:`int`
+    
+    :param subcategory_type: Тип подкатегории.
+    :type subcategory_type: :obj:`SubCategoryTypes`
+    
+    :param short_description: Краткое описание.
+    :type short_description: :obj:`str` or :obj:`None`, опционально
+    
+    :param full_description: Подробное описание.
+    :type full_description: :obj:`str` or :obj:`None`, опционально
+    
+    :param seller_username: Юзернейм продавца.
+    :type seller_username: :obj:`str`
+    
+    :param seller_id: ID продавца.
+    :type seller_id: :obj:`int`
+    """
+    def __init__(self, lot_id: int,
+                 subcategory_id: int, subcategory_type: SubCategoryTypes,
+                 short_description: str | None, full_description: str | None,
+                 seller_username: str, seller_id: int) -> None:
+        self.lot_id: int  = lot_id
+        """ID лота"""
+        self.subcategory_id: int = subcategory_id
+        """ID подкатегории"""
+        self.subcategory_type: SubCategoryTypes  = subcategory_type
+        """Тип подкатегории"""
+        self.short_description: str | None = short_description
+        """Краткое описание"""
+        self.full_description: str | None = full_description
+        """Подробное описание"""
+        self.seller_username: str = seller_username
+        """Юзернейм продавца"""
+        self.seller_id: int = seller_id
+        """"ID продавца"""
+        
+    @property
+    def seller_url(self) -> str:
+        """Публичная ссылка на продавца"""
+        return f"https://funpay.com/users/{self.seller_username}/"
+    
+    
+class PaymentMethod:
+    """
+    Данный класс представляет информацию о методе оплаты.
+    
+    :param method_name: Название метода.
+    :type method_name: :obj:`str`
+    
+    :param method_price: Стоимость с учётом комиссии метода.
+    :type method_price: :obj:`str`
+    
+    :param unit: Символ валюты метода.
+    :type unit: :obj:`str`
+    
+    :param position: Позиция метода.
+    :type position: :obj:`int` or :obj:`None`, опционально
+    """
+    def __init__(self, method_name: str, method_price: str, unit: str,
+                 position: int | None = None):
+        self.method_name: str = method_name
+        """Название метода."""
+        self.method_price: float = float(method_price.replace(' ', ''))
+        """Стоимость с учётом комиссии метода."""
+        self.method_currency: Literal['RUB', 'USD', 'EUR'] = get_currency_code(unit)
+        """Валюта метода."""
+        self.position: int | None = position
+        """Позиция метода."""
+        
+    
+    def method_commission(self, account_currency: Literal['RUB', 'USD', 'EUR'],
+                          source_price: int | float) -> float | None:
+        if account_currency != self.method_currency:
+            return None
+        
+        return 100 - (source_price / self.method_price * 100)
+    
+    
+class CalculateResult:
+    """
+    Данный класс представляет результат вычислений комисcии.
+    
+    :param source_price: Цена без комиссии.
+    :type source_price: :obj:`int` or :obj:`float`
+    
+    :param account_currency: Валюта аккаунта.
+    :type account_currency: :obj:`str`
+
+    :param subcategory_id: ID подкатегории.
+    :type subcategory_id: :obj:`int`
+    
+    :param subcategory_type: Тип подкатегории.
+    :type subcategory_type: :obj:`FunPayAPI.enums.SubCategoryTypes`
+    
+    :param methods: Методы оплаты.
+    :type methods: :obj:`list` of :obj:`FunPayAPI.types.PaymentMethod`
+    """
+    def __init__(self, source_price: int | float, account_currency: Literal['RUB', 'USD', 'EUR'],
+                 subcategory_id: int, subcategory_type: SubCategoryTypes, methods: list[PaymentMethod]):
+        self.source_price: int | float = source_price
+        """Цена без комиссии."""
+        self._account_currency: Literal['RUB', 'USD', 'EUR']  = account_currency
+        """Валюта аккаунта."""
+        self.subcategory_id: int = subcategory_id
+        """ID подкатегории."""
+        self.subcategory_type: SubCategoryTypes  = subcategory_type
+        """Тип подкатегории."""
+        self.methods: list[PaymentMethod]  = methods
+        """Методы оплаты."""
+        
+    @property
+    def commission_percent(self) -> float | None:
+        commissions = []
+        for method in self.methods:
+            if commission := method.method_commission(self._account_currency, self.source_price):
+                commissions.append(commission)
+            
+        return min(commissions) if commissions else None

@@ -14,6 +14,10 @@ import json
 import time
 import re
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from typing import Any, Literal
+
 from . import types
 from .common import exceptions, utils, enums
 
@@ -60,6 +64,8 @@ class Account:
         """Активные продажи."""
         self.active_purchases: int | None = None
         """Активные покупки."""
+        self.currency: Literal["RUB", "USD", "EUR"] | None = None
+        """Валюта аккаунта."""
 
         self.csrf_token: str | None = None
         """CSRF токен."""
@@ -85,6 +91,20 @@ class Account:
 
         self.__bot_character = "⁤"
         """Если сообщение начинается с этого символа, значит оно отправлено ботом."""
+
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=6,              # Количество попыток
+            connect=6,            # Попытки при ошибке соединения (ConnectionError)
+            read=6,               # Попытки при ошибке чтения (ReadError)
+            redirect=6,           # Попытки при редиректе (HTTP 301, 302 и т. д.)
+            status=6,             
+            backoff_factor=1,  # Время ожидания: 0.5, 1, 2, 4, 8 сек
+            status_forcelist=[429, 443, 500, 502, 503, 504],  # Ошибки, при которых повторяем
+            allowed_methods={"GET", "POST"}  # Методы, для которых делаем повтор
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
 
     def method(self, request_method: Literal["post", "get"], api_method: str, headers: dict, payload: Any,
                exclude_phpsessid: bool = False, raise_not_200: bool = False) -> requests.Response:
@@ -117,9 +137,21 @@ class Account:
         if self.user_agent:
             headers["user-agent"] = self.user_agent
         link = api_method if api_method.startswith("https://funpay.com") else "https://funpay.com/" + api_method
-        response = getattr(requests, request_method)(link, headers=headers, data=payload, timeout=self.requests_timeout,
-                                                     proxies=self.proxy or {})
-
+        
+        while True:
+            response = self.session.request(
+                method=request_method,
+                url=link,
+                headers=headers,
+                data=payload,
+                timeout=self.requests_timeout,
+                proxies=self.proxy or {}
+            )
+            if response.status_code == 429:
+                time.sleep(0.4)
+                continue
+            break
+            
         if response.status_code == 403:
             raise exceptions.UnauthorizedError(response)
         elif response.status_code != 200 and raise_not_200:
@@ -145,6 +177,13 @@ class Account:
         username = parser.find("div", {"class": "user-link-name"})
         if not username:
             raise exceptions.UnauthorizedError(response)
+        
+        available_currencies = ["rub", "usd", "eur"]
+        dropdown_currencies = parser.find_all("a", {"class": f"user-cy-switcher menu-item-currency"})
+        for dropdown_currency in dropdown_currencies:
+            if dropdown_currency['data-cy'] in available_currencies:
+                available_currencies.remove(dropdown_currency['data-cy'])
+        self.currency = available_currencies[0].upper() if len(available_currencies) == 1 else None
 
         self.username = username.text
         self.app_data = json.loads(parser.find("body").get("data-app-data"))
@@ -200,19 +239,7 @@ class Account:
         subcategory_obj = self.get_subcategory(subcategory_type, subcategory_id)
         result = []
         for offer in offers:
-            offer_id = offer["href"].split("id=")[1]
-            description = offer.find("div", {"class": "tc-desc-text"})
-            description = description.text if description else None
-            server = offer.find("div", {"class": "tc-server hidden-xxs"})
-            if not server:
-                server = offer.find("div", {"class": "tc-server hidden-xs"})
-            server = server.text if server else None
-
-            if subcategory_type is types.SubCategoryTypes.COMMON:
-                price = float(offer.find("div", {"class": "tc-price"})["data-s"])
-            else:
-                price = float(offer.find("div", {"class": "tc-price"}).find("div").text.split()[0])
-            lot_obj = types.LotShortcut(offer_id, server, description, price, subcategory_obj, str(offer))
+            lot_obj = self._parse_public_lot(subcategory_obj, offer)
             result.append(lot_obj)
         return result
 
@@ -281,7 +308,9 @@ class Account:
         if not json_response.get("chat") or not json_response["chat"].get("messages"):
             return []
         if isinstance(chat_id, int):
-            interlocutor_id = int(json_response["chat"]["node"]["name"].split("-")[2])
+            interlocutors = json_response["chat"]["node"]["name"].split("-")[1:]
+            interlocutors.remove(str(self.id))
+            interlocutor_id = int(interlocutors[0])
         else:
             interlocutor_id = None
         return self.__parse_messages(json_response["chat"]["messages"], chat_id, interlocutor_id,
@@ -320,7 +349,9 @@ class Account:
                 result[i.get("id")] = []
                 continue
             if isinstance(i.get("id"), int):
-                interlocutor_id = int(i["data"]["node"]["name"].split("-")[2])
+                interlocutors = i["data"]["node"]["name"].split("-")[1:]
+                interlocutors.remove(str(self.id))
+                interlocutor_id = int(interlocutors[0])
                 interlocutor_name = chats_data[i.get("id")]
             else:
                 interlocutor_id = None
@@ -453,7 +484,9 @@ class Account:
                 image_link = image_link.get("href")
                 message_text = None
             else:
-                message_text = parser.find("div", {"class": "chat-msg-text"}).text.replace(self.__bot_character, "", 1)
+                message_text_obj = parser.find("div", {"class": "chat-msg-text"})
+                if message_text_obj:
+                    message_text = message_text_obj.text.replace(self.__bot_character, "", 1)
         except Exception as e:
             logger.debug("SEND_MESSAGE RESPONSE")
             logger.debug(response.content.decode())
@@ -717,7 +750,18 @@ class Account:
         avatar_link = parser.find("div", {"class": "avatar-photo"}).get("style").split("(")[1].split(")")[0]
         avatar_link = avatar_link if avatar_link.startswith("https") else f"https://funpay.com{avatar_link}"
         banned = bool(parser.find("span", {"class": "label label-danger"}))
-        user_obj = types.UserProfile(user_id, username, avatar_link, "Онлайн" in user_status, banned, html_response)
+
+        reviews_amount, rating = 0, None
+        if parser.find("h5", {"id": "reviews"}):
+            rating_block = parser.find("div", {"class": "row row-20 row-inline"})
+            rating = rating_block.find("span", {"class": "big"})
+            rating = float(rating.text) if rating and rating.text != "?" else None
+            
+            reviews = parser.find("div", {"class": "text-mini text-light mb5"})
+            reviews_amount = int("".join(reviews.text.split(" ")[:-4])) if reviews else 0
+        
+        user_obj = types.UserProfile(user_id, username, avatar_link, "Онлайн" in user_status,
+                                     banned, rating, reviews_amount, html_response)
 
         subcategories_divs = parser.find_all("div", {"class": "offer-list-title-container"})
 
@@ -735,21 +779,9 @@ class Account:
 
             offers = i.parent.find_all("a", {"class": "tc-item"})
             for j in offers:
-                offer_id = j["href"].split("id=")[1]
-                description = j.find("div", {"class": "tc-desc-text"})
-                description = description.text if description else None
-                server = j.find("div", {"class": "tc-server hidden-xxs"})
-                if not server:
-                    server = j.find("div", {"class": "tc-server hidden-xs"})
-                server = server.text if server else None
-
-                if subcategory_obj.type is types.SubCategoryTypes.COMMON:
-                    price = float(j.find("div", {"class": "tc-price"})["data-s"])
-                else:
-                    price = float(j.find("div", {"class": "tc-price"}).find("div").text.split(" ")[0])
-
-                lot_obj = types.LotShortcut(offer_id, server, description, price, subcategory_obj, str(j))
+                lot_obj = self._parse_public_lot(subcategory_obj, j)
                 user_obj.add_lot(lot_obj)
+
         return user_obj
 
     def get_chat(self, chat_id: int) -> types.Chat:
@@ -813,6 +845,7 @@ class Account:
         full_description = None
         sum_ = None
         subcategory = None
+        fields = {}
         for div in parser.find_all("div", {"class": "param-item"}):
             if not (h := div.find("h5")):
                 continue
@@ -821,7 +854,7 @@ class Account:
             elif h.text == "Подробное описание":
                 full_description = div.find("div").text
             elif h.text == "Сумма":
-                sum_ = float(div.find("span").text)
+                sum_ = float(div.find("span").text.replace(" ", ""))
             elif h.text == "Категория":
                 subcategory_link = div.find("a").get("href")
                 subcategory_split = subcategory_link.split("/")
@@ -829,6 +862,8 @@ class Account:
                 subcategory_type = types.SubCategoryTypes.COMMON if "lots" in subcategory_link else \
                     types.SubCategoryTypes.CURRENCY
                 subcategory = self.get_subcategory(subcategory_type, subcategory_id)
+            elif h.text not in ("Открыт", "Закрыт", "Действия", "Отзыв"):
+                fields[h.text] = div.find("div").text
 
         chat = parser.find("div", {"class": "chat-header"})
         chat_link = chat.find("div", {"class": "media-user-name"}).find("a")
@@ -855,13 +890,20 @@ class Account:
         else:
             reply = reply_obj.find("div").text.strip()
 
+        delivered_products = parser.find_all("span", {"class": "secret-placeholder"})
+        delivered_products = [i.text for i in delivered_products if i.text]
+
         if all([not text, not reply]):
             review = None
         else:
             review = types.Review(stars, text, reply, False, str(reply_obj), order_id, buyer_username, buyer_id)
+            
+        amount = 1
+        if (amount_in_fields := fields.get("Количество")):
+            amount = int(amount_in_fields.replace(" ", "")[:-3])
 
-        order = types.Order(order_id, status, subcategory, short_description, full_description, sum_,
-                            buyer_id, buyer_username, seller_id, seller_username, html_response, review)
+        order = types.Order(order_id, status, amount, subcategory, short_description, full_description, sum_,
+                            buyer_id, buyer_username, seller_id, seller_username, html_response, fields, review, delivered_products)
         return order
 
     def get_sells(self, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
@@ -970,7 +1012,8 @@ class Account:
                 continue
 
             description = div.find("div", {"class": "order-desc"}).find("div").text
-            price = float(div.find("div", {"class": "tc-price"}).text.split(" ")[0])
+            *price, currency = div.find("div", {"class": "tc-price"}).text.split(" ")
+            price, currency = float("".join(price)), utils.get_currency_code(currency)
 
             buyer_div = div.find("div", {"class": "media-user-name"}).find("span")
             buyer_username = buyer_div.text
@@ -999,7 +1042,7 @@ class Account:
                 h, m = split[1].split(":")
                 order_date = datetime(year, month, day, int(h), int(m))
 
-            order_obj = types.OrderShortcut(order_id, description, price, buyer_username, buyer_id, order_status,
+            order_obj = types.OrderShortcut(order_id, description, price, currency, buyer_username, buyer_id, order_status,
                                             order_date, subcategory_name, str(div))
             sells.append(order_obj)
 
@@ -1126,8 +1169,152 @@ class Account:
 
         self.add_chats(self.request_chats())
         return self.get_chat_by_id(chat_id)
+    
+    
+    def calculate(self, subcategory_type: enums.SubCategoryTypes, subcategory_id: int,
+                  price: int | float = 1000) -> types.CalculateResult:
+        """
+        Получает цену с учетом комисии каждого метода оплаты для подкатегории.
 
-    def get_lot_fields(self, lot_id: int) -> types.LotFields:
+        :param subcategory_type: тип подкатегории.
+        :type subcategory_type: :class:`FunPayAPI.enums.SubCategoryTypes`
+
+        :param subcategory_id: ID подкатегории.
+        :type subcategory_id: :obj:`int`
+        
+        :param price: ID цена.
+        :type price: :obj:`int` or :obj:`float`
+
+        :return: объект со списком всех методов оплаты.
+        :rtype: :obj:`FunPayAPI.types.CalculateResult`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+        
+        headers = {
+            "accept": "*/*",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest"
+        } 
+        payload = {
+            "nodeId" if subcategory_type is enums.SubCategoryTypes.COMMON else "game": subcategory_id,
+            "price": price
+        }
+        api_method = "lots/calc" if subcategory_type is enums.SubCategoryTypes.COMMON else "chips/calc"
+        response = self.method("post", api_method, headers, payload)
+        json_response = response.json()
+        if (error := json_response.get("error")):
+            raise exceptions.CalculateError(response, error, subcategory_id, subcategory_type, price)
+        
+        methods = [
+            types.PaymentMethod(
+                method['name'], method['price'], method['unit'],
+                method['pos'] if subcategory_type == enums.SubCategoryTypes.COMMON else method['sort']
+            )
+            for method in json_response["methods"]
+        ]
+        return types.CalculateResult(price, self.currency, subcategory_id, subcategory_type, methods)
+    
+    
+    def get_trade_page_lots(self, subcategory_type: enums.SubCategoryTypes, subcategory_id: int) -> list[types.MyLotShortcut]:
+        """
+        Получает список своих лотов в разделе.
+
+        :param subcategory_type: тип подкатегории.
+        :type subcategory_type: :class:`FunPayAPI.enums.SubCategoryTypes`
+
+        :param subcategory_id: ID подкатегории.
+        :type subcategory_id: :obj:`int`
+
+        :return: список виджетов лотов.
+        :rtype: :obj:`list` of :obj:`FunPayAPI.types.MyLotShortcut`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+        headers = {
+            "accept": "*/*"
+        }
+        endpoint = ("lots" if subcategory_type == enums.SubCategoryTypes.COMMON else "chips") + f"/{subcategory_id}/trade"
+        response = self.method("get", endpoint, headers, {}, raise_not_200=True)
+        html_response = response.content.decode()
+        parser = BeautifulSoup(html_response, "html.parser")
+        username = parser.find("div", {"class": "user-link-name"})
+        if not username:
+            raise exceptions.UnauthorizedError(response)
+        
+        lots = []
+        lot_blocks = parser.find_all("a", {"class": "tc-item"})
+        for block in lot_blocks:
+            is_active = "warning" not in block['class']
+            id_ = int(block['data-offer'])
+            description = block.find("div", {"class": "tc-desc-text"}).text
+            
+            server_block = block.find("div", {"class": "tc-server"})
+            server = server_block.text if server_block else None
+            
+            amount_block = block.find("div", {"class": "tc-amount"})
+            amount = int(amount_block.text.replace(" ", "")) if amount_block else None
+            
+            price_block = block.find("div", {"class": "tc-price"})
+            auto_delivery = bool(price_block.find("i", class_="auto-dlv-icon"))
+
+            if subcategory_type is types.SubCategoryTypes.COMMON:
+                price = float(price_block["data-s"])
+            else:
+                *price_parts, _ = price_block.find("div").text.split()
+                price = float("".join(price_parts))
+                
+            lots.append(types.MyLotShortcut(id_, description, price, is_active, auto_delivery, server, amount, str(block)))
+            
+        return lots
+    
+    
+    def get_lot_page(self, lot_id: int) -> types.LotPage | None:
+        """
+        Возвращает страницу лота по его ID.
+
+        :param lot_id: ID лота.
+        :type lot_id: :obj:`int`
+
+        :return: объект страницы лота или :obj:`None`, если лот не был найден.
+        :rtype: :class:`FunPayAPI.types.lotPage` or :obj:`None`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+        headers = {
+            "accept": "*/*"
+        }
+        response = self.method("get", f"lots/offer?id={lot_id}", headers, {}, raise_not_200=True)
+        html_response = response.content.decode()
+        parser = BeautifulSoup(html_response, "html.parser")
+        username = parser.find("div", {"class": "user-link-name"})
+        if not username:
+            raise exceptions.UnauthorizedError(response)
+        
+        if (title := parser.find("h1", {"class": "page-header"})) and title.text == "Предложение не найдено":
+            return None
+        
+        back_link = parser.find("a", {"class":  "js-back-link"})
+        subcategory_id = int(back_link['href'].split("/")[-2])
+        subcategory_type = types.SubCategoryTypes.COMMON if "/lots/" in back_link['href'] else types.SubCategoryTypes.CURRENCY
+        
+        seller_block =  parser.find("div", {"class":  "media-user-name"}).find("a")
+        seller_username = seller_block.text
+        seller_id =  int(seller_block['href'].split("/")[-2])
+        
+        short_description, full_description  = None, None
+        for param_item in parser.find_all("div", {"class": "param-item"}):
+            if (param_name := param_item.find("h5")):
+                if param_name.text == "Краткое описание":
+                    short_description = param_item.find("div").text
+                elif param_name.text ==  "Подробное описание":
+                    full_description = param_item.find("div").text
+                    
+        return types.LotPage(lot_id, subcategory_id, subcategory_type, short_description, full_description,
+                             seller_username, seller_id)
+        
+
+    def get_lot_fields(self, lot_id: int) -> types.LotFields | None:
         """
         Получает все поля лота.
 
@@ -1144,16 +1331,64 @@ class Account:
         html_response = response.content.decode()
 
         bs = BeautifulSoup(html_response, "html.parser")
+        
+        lot_not_found = bs.find("p", {"class": "lead"})
+        if lot_not_found:
+            return None
 
         result = {"active": "", "deactivate_after_sale": ""}
         result.update({field["name"]: field.get("value") or "" for field in bs.find_all("input")
                        if field["name"] not in ["active", "deactivate_after_sale"]})
         result.update({field["name"]: field.text or "" for field in bs.find_all("textarea")})
-        result.update({field["name"]: field.find("option", selected=True)["value"] for field in bs.find_all("select")})
+        options = {}
+        for field in bs.find_all("select"):
+            field_data = field.find("option", selected=True)
+            if field_data:
+                options[field["name"]] = field_data["value"]
+        result.update(options)
         result.update({field["name"]: "on" for field in bs.find_all("input", {"type": "checkbox"}, checked=True)})
-        return types.LotFields(lot_id, result)
 
-    def save_lot(self, lot_fields: types.LotFields):
+        prices_html = bs.find("table", class_="table-buyers-prices")
+        prices = {}
+        for row in prices_html.find_all("tr"):
+            method = row.find("th").text
+            price_raw = row.find("td").text
+            *price_parts, currency_part = price_raw.split()
+            method_currency = utils.get_currency_code(currency_part)
+            price = float("".join(price_parts))
+            if method_currency == self.currency:
+                prices[method] = {"price": price, "currency": method_currency}
+
+        table_price = prices[min(prices, key=lambda x: prices[x]['price'])]['price']
+        commission_percent = 100 - (price / table_price * 100)
+
+        return types.LotFields(lot_id, prices, table_price, commission_percent, self.currency, result)
+    
+    
+    def delete_lot(self, lot_id: int | str) -> None:
+        """
+        Удаляет лот.
+
+        :param lot_id: ID лота.
+        :type lot_id: :obj:`int`
+        """
+        if not self.is_initiated:
+            raise exceptions.AccountNotInitiatedError()
+        
+        headers = {
+            "accept": "*/*",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest",
+        }
+        params = {"offer_id": str(lot_id), "deleted": "1", "csrf_token": self.csrf_token}
+
+        response = self.method("post", "lots/offerSave", headers, params, raise_not_200=True)
+        json_response = response.json()
+        if json_response.get("error"):
+            raise exceptions.LotSavingError(response, json_response.get("error"), lot_id)
+        
+
+    def save_lot(self, lot_fields: types.LotFields) -> types.SubCategory | None:
         """
         Сохраняет лот на FunPay.
 
@@ -1174,6 +1409,13 @@ class Account:
         json_response = response.json()
         if json_response.get("error"):
             raise exceptions.LotSavingError(response, json_response.get("error"), lot_fields.lot_id)
+        
+        subcategory_type, subcategory_id = json_response['url'].split("/")[3:5]
+        return self.get_subcategory(
+            enums.SubCategoryTypes.COMMON if subcategory_type == "lots" else enums.SubCategoryTypes.CURRENCY,
+            int(subcategory_id)
+        )
+
 
     def get_category(self, category_id: int) -> types.Category | None:
         """
@@ -1252,6 +1494,62 @@ class Account:
         :rtype: :obj:`bool`
         """
         return self.__initiated
+    
+    def _parse_public_lot(self, subcategory_obj: types.SubCategory, parser: BeautifulSoup) -> types.LotShortcut:
+        offer_id = parser["href"].split("id=")[1]
+        description = parser.find("div", {"class": "tc-desc-text"})
+        description = description.text if description else None
+        server = parser.find("div", {"class": "tc-server hidden-xxs"})
+        if not server:
+            server = parser.find("div", {"class": "tc-server hidden-xs"})
+        server = server.text if server else None
+
+        amount_block = parser.find("div", {"class": "tc-amount"})
+        raw_amount = amount_block.text.replace(" ", "") if amount_block else None
+        amount = int(raw_amount) if raw_amount and raw_amount.isdigit() else None
+
+        price_block = parser.find("div", {"class": "tc-price"})
+        autodelivery = bool(price_block.find("i", class_="auto-dlv-icon"))
+        promo = bool(price_block.find("i", class_="promo-offer-icon"))
+
+        seller = self._parse_seller_shortcut(parser)
+        my_lot = seller is None or self.id == seller.seller_id
+
+        currency = utils.get_currency_code(price_block.find("span", {"class": "unit"}).text)
+        if subcategory_obj.type is types.SubCategoryTypes.COMMON:
+            price = float(price_block["data-s"])
+        else:
+            *price_parts, _ = price_block.find("div").text.split()
+            price = float("".join(price_parts))
+
+        return types.LotShortcut(
+            offer_id, server, description, price, currency, subcategory_obj,
+            my_lot, seller, amount, autodelivery, promo, str(parser)
+        )
+    
+    def _parse_seller_shortcut(self, parser: BeautifulSoup) -> types.SellerShortcut | None:
+        seller_block = parser.find("div", {"class": "tc-user"})
+        if not seller_block:
+            return None
+        
+        seller_online = parser.get("data-online", "0") == "1"
+
+        seller_data_block = seller_block.find("div", {"class": "media-user-name"}).find("span", {"class": "pseudo-a"})
+        seller_username = seller_data_block.text
+        seller_id = int(seller_data_block['data-href'].split("/")[-2])
+
+        rating_block = seller_block.find("div", {"class": "media-user-reviews"})
+        stars_amount = len(rating_block.find_all("i", {"class": "fas"}))
+        
+        reviews_amount_raw = seller_block.find("span", {"class": "rating-mini-count"})
+        reviews_amount = 0
+        if reviews_amount_raw and reviews_amount_raw.text.isdigit():
+            reviews_amount = int(reviews_amount_raw.text)
+
+        avatar_block = seller_block.find("div", {"class": "avatar-photo pseudo-a"})
+        avatar_link = avatar_block.get("style").split("(")[1].split(")")[0]
+
+        return types.SellerShortcut(seller_username, seller_id, seller_online, avatar_link, stars_amount, reviews_amount, str(seller_block))
 
     def __setup_categories(self, html: str):
         """
@@ -1331,9 +1629,13 @@ class Account:
             else:
                 image_link = None
                 if author_id == 0:
-                    message_text = parser.find("div", {"class": "alert alert-with-icon alert-info"}).text.strip()
+                    message_text_obj = parser.find("div", {"class": "alert alert-with-icon alert-info"})
+                    if message_text_obj:
+                        message_text = message_text_obj.text.strip()
                 else:
-                    message_text = parser.find("div", {"class": "chat-msg-text"}).text
+                    message_text_obj = parser.find("div", {"class": "chat-msg-text"})
+                    if message_text_obj:
+                        message_text = message_text_obj.text
 
             by_bot = False
             if message_text and message_text.startswith(self.__bot_character):

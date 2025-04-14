@@ -110,7 +110,7 @@ class Runner:
 
         response = self.account.method("post", "runner/", headers, payload, raise_not_200=True)
         json_response = response.json()
-        logger.debug(f"Получены данные о событиях: {json_response}")
+        # logger.debug(f"Получены данные о событиях: {json_response}")
         return json_response
 
     def parse_updates(self, updates: dict) -> list[InitialChatEvent | ChatsListChangedEvent |
@@ -291,6 +291,14 @@ class Runner:
             self.last_messages_ids[cid] = messages[-1].id  # Перезаписываем ID последнего сообщение
             self.by_bot_ids[cid] = [i for i in self.by_bot_ids[cid] if i > self.last_messages_ids[cid]]  # чистим память
 
+            # Удаляем сообщения одинакового содержимого от одного и того же пользователя
+            # (последнее сообщение оставить)
+            filtered_messages = [messages[0]]  # Добавляем первый элемент
+            for i in range(1, len(messages)):
+                if messages[i].text != messages[i - 1].text or messages[i].author_id != messages[i - 1].author_id:
+                    filtered_messages.append(messages[i])
+            messages[:] = filtered_messages  # Изменяем список на новый
+            
             for msg in messages:
                 event = NewMessageEvent(self.__last_msg_event_tag, msg, stack)
                 stack.add_events([event])
