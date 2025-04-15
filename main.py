@@ -27,7 +27,7 @@ logo = f"""
                           ╚═══╝  ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝{Style.RESET_ALL}
 """
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 if getattr(sys, 'frozen', False):
     os.chdir(os.path.dirname(sys.executable))
