@@ -1,0 +1,8 @@
+version: '3.3'
+
+services:
+  funpay:
+    build: ./
+    container_name: funpay-vertex 
+    restart: unless-stopped
+    tty: true
