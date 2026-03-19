@@ -132,8 +132,11 @@ class Account:
         :return: объект ответа.
         :rtype: :class:`requests.Response`
         """
-        headers["cookie"] = f"golden_key={self.golden_key}"
-        headers["cookie"] += f"; PHPSESSID={self.phpsessid}" if self.phpsessid and not exclude_phpsessid else ""
+        # Pass cookies via the dedicated requests API so they survive redirects
+        # from https://funpay.com to locale-specific paths like /uk/.
+        cookies = {"golden_key": self.golden_key}
+        if self.phpsessid and not exclude_phpsessid:
+            cookies["PHPSESSID"] = self.phpsessid
         if self.user_agent:
             headers["user-agent"] = self.user_agent
         link = api_method if api_method.startswith("https://funpay.com") else "https://funpay.com/" + api_method
@@ -143,6 +146,7 @@ class Account:
                 method=request_method,
                 url=link,
                 headers=headers,
+                cookies=cookies,
                 data=payload,
                 timeout=self.requests_timeout,
                 proxies=self.proxy or {}
@@ -198,7 +202,7 @@ class Account:
 
         cookies = response.cookies.get_dict()
         if update_phpsessid or not self.phpsessid:
-            self.phpsessid = cookies["PHPSESSID"]
+            self.phpsessid = cookies.get("PHPSESSID") or self.session.cookies.get("PHPSESSID")
         if not self.is_initiated:
             self.__setup_categories(html_response)
 
