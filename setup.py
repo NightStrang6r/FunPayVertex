@@ -9,7 +9,8 @@ common_packages = [
     "pytelegrambotapi==4.8.0",
     "pillow>=9.3.0",
     "aiohttp==3.8.3",
-    "requests_toolbelt==0.10.1"
+    "requests_toolbelt==0.10.1",
+    "PySocks>=1.7.1"
 ]
 
 
