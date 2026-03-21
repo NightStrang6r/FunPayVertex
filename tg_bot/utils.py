@@ -21,6 +21,7 @@ import tg_bot.CBT
 from bs4 import BeautifulSoup
 from FunPayAPI.account import Account
 from FunPayAPI.types import OrderStatuses
+import FunPayAPI.types as types
 from FunPayAPI.updater.events import *
 localizer = Localizer()
 _ = localizer.translate
@@ -253,10 +254,32 @@ def message_hook(vertex: Vertex, event: NewMessageEvent):
         with open("storage/cache/advProfileStat.json", "w", encoding="UTF-8") as f:
             f.write(json.dumps(ORDER_CONFIRMED, indent=4, ensure_ascii=False))
 
-def extract_float(text):
-    cleaned_text = re.sub(r'[^\d.,]', '', text)
-    cleaned_text = cleaned_text.replace(',', '')
-    return float(cleaned_text)
+def extract_float(text: str) -> float:
+    """
+    Преобразует строку с ценой в число с плавающей точкой.
+    Поддерживает форматы с пробелами/неразрывными пробелами и запятой/точкой как разделителем.
+    """
+    # Удаляем все, кроме цифр и разделителей, а также пробелы/неразрывные пробелы
+    s = re.sub(r"[^\d,\.]", "", text).replace("\u00A0", "").replace(" ", "")
+    if not s:
+        return 0.0
+    # Если присутствуют и точка, и запятая — считаем правый разделитель десятичным, остальные убираем
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            # десятичный разделитель — запятая
+            s = s.replace(".", "")
+            s = s.replace(",", ".")
+        else:
+            # десятичный разделитель — точка
+            s = s.replace(",", "")
+    else:
+        # Только запятая — заменяем на точку
+        if "," in s:
+            s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
 
 def get_sales(account: Account, start_from: str | None = None, include_paid: bool = True, include_closed: bool = True,
               include_refunded: bool = True, exclude_ids: list[str] | None = None,
@@ -321,20 +344,23 @@ def get_sales(account: Account, start_from: str | None = None, include_paid: boo
     return next_order_id, sells
 
 def generate_adv_profile(vertex: Vertex) -> str:
+    """
+    Генерирует расширенную статистику профиля.
+    Защита от ошибок парсинга: при сбое возвращает частичные данные без падения.
+    """
     account = vertex.account
     balance = vertex.balance
-    if balance.total_eur != 0:
-        currency = "€"
-        balance.balance.total_eur
-    elif balance.total_eur != 0:
-        currency = "$"
-        balance.balance.total_eur
-    elif balance.total_eur != 0:
-        currency = "₽"
-        balance.balance.total_eur
+
+    # Выбираем валюту и базовое числовое значение из объекта баланса
+    # (без сетевых запросов и без перезаписи переменной balance)
+    if balance.total_eur:
+        currency, balance_value = "€", balance.total_eur
+    elif balance.total_usd:
+        currency, balance_value = "$", balance.total_usd
+    elif balance.total_rub:
+        currency, balance_value = "₽", balance.total_rub
     else:
-        balance = 0
-        currency = "₽"
+        currency, balance_value = "₽", 0.0
     if exists("storage/cache/advProfileStat.json"):
         with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
             global ORDER_CONFIRMED
@@ -345,7 +371,7 @@ def generate_adv_profile(vertex: Vertex) -> str:
     refundsPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
     canWithdraw = {"now": 0.0, "hour": 0.0, "day": 0.0, "2day": 0.0}
 
-    account.get()
+    # Лишний сетевой запрос не выполняем: данные обновляются перед вызовом
 
     for order in ORDER_CONFIRMED.copy():
         if time.time() - ORDER_CONFIRMED[order]["time"] > 172800:
@@ -358,76 +384,135 @@ def generate_adv_profile(vertex: Vertex) -> str:
         else:
             canWithdraw["2day"] += ORDER_CONFIRMED[order]["price"]
 
-    randomLotPageLink = bs(account.method("get", "https://funpay.com/lots/693/", {}, {}).text, "html.parser").find("a", {"class": "tc-item"})["href"]
-    randomLotPageParse = bs(account.method("get", randomLotPageLink, {}, {}).text, "html.parser")
+    # Пытаемся получить актуальный выводимый баланс и валюту из страницы лота.
+    # Если верстка поменялась — используем fallback из объекта баланса.
+    try:
+        randomLotPageLink = bs(account.method("get", "https://funpay.com/lots/693/", {}, {}).text, "html.parser").find("a", {"class": "tc-item"})["href"]
+        randomLotPageParse = bs(account.method("get", randomLotPageLink, {}, {}).text, "html.parser")
 
-    balance = randomLotPageParse.select_one(".badge-balance").text.split(" ")[0]
-    currency = randomLotPageParse.select_one(".badge-balance").text.split(" ")[1]
+        parsed_balance_text = randomLotPageParse.select_one(".badge-balance").text.split(" ")
+        balance_text_value, balance_text_currency = parsed_balance_text[0], parsed_balance_text[1]
 
-    canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-rub"]
-    if currency == "$":
-        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-usd"]
-    elif currency == "€":
-        canWithdraw["now"] = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})["data-balance-eur"]
+        # Обновляем валюту и отображаемый баланс из страницы, если получилось распарсить
+        currency = balance_text_currency
+        balance_display = balance_text_value
 
-    next_order_id, all_sales = get_sales(account)
-
-    while next_order_id != None:
-        time.sleep(1)
-        next_order_id, new_sales = get_sales(account, start_from=next_order_id)
-        all_sales += new_sales
-
-    for sale in all_sales:
-        if sale.status == OrderStatuses.REFUNDED:
-            refunds["all"] += 1
-            refundsPrice["all"] += sale.price
+        selectpicker = randomLotPageParse.find("select", {"class": "form-control input-lg selectpicker"})
+        if currency == "₽":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-rub", 0) or 0)
+        elif currency == "$":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-usd", 0) or 0)
+        elif currency == "€":
+            canWithdraw["now"] = str(selectpicker.get("data-balance-eur", 0) or 0)
         else:
-            sales["all"] += 1
-            salesPrice["all"] += sale.price
+            canWithdraw["now"] = "0"
+    except Exception:
+        # Fallback: используем доступный баланс по выбранной валюте из объекта баланса
+        if currency == "₽":
+            canWithdraw["now"] = str(balance.available_rub)
+        elif currency == "$":
+            canWithdraw["now"] = str(balance.available_usd)
+        elif currency == "€":
+            canWithdraw["now"] = str(balance.available_eur)
+        balance_display = f"{balance_value}"
 
-        upperDate = bs(sale.html, "html.parser").find("div", {"class": "tc-date-time"}).text
-        date = bs(sale.html, "html.parser").find("div", {"class": "tc-date-left"}).text
+    # Получаем продажи через встроенный метод API с пагинацией
+    try:
+        next_order_id, all_sales = account.get_sells()
+        while next_order_id is not None:
+            time.sleep(1)
+            next_order_id, new_sales = account.get_sells(start_from=next_order_id)
+            all_sales += new_sales
+    except Exception:
+        all_sales = []
 
-        if "сегодня" in upperDate or "сьогодні" in upperDate or "today" in upperDate:
-            if sale.status == OrderStatuses.REFUNDED:
-                refunds["day"] += 1
-                refunds["week"] += 1
-                refunds["month"] += 1
-                refundsPrice["day"] += sale.price
-                refundsPrice["week"] += sale.price
-                refundsPrice["month"] += sale.price
+    # Инициализируем агрегаты по валютам
+    currencies = ["USD", "RUB", "EUR"]
+    sym = {"USD": "$", "RUB": "₽", "EUR": "€"}
+    stats = {
+        cur: {
+            "sales": {"day": 0, "week": 0, "month": 0, "all": 0},
+            "salesPrice": {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
+            "refunds": {"day": 0, "week": 0, "month": 0, "all": 0},
+            "refundsPrice": {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
+        }
+        for cur in currencies
+    }
+
+    now_dt = datetime.datetime.now()
+    for sale in all_sales:
+        cur = getattr(sale, "currency", None)
+        if cur not in stats:
+            # неизвестная валюта — пропускаем
+            continue
+        is_refund = sale.status == OrderStatuses.REFUNDED
+        delta = now_dt - sale.date if hasattr(sale, "date") else datetime.timedelta.max
+
+        if is_refund:
+            stats[cur]["refunds"]["all"] += 1
+            stats[cur]["refundsPrice"]["all"] += sale.price
+        else:
+            stats[cur]["sales"]["all"] += 1
+            stats[cur]["salesPrice"]["all"] += sale.price
+
+        # За сутки / неделю / месяц считаем по относительному времени
+        if delta <= datetime.timedelta(days=1):
+            if is_refund:
+                stats[cur]["refunds"]["day"] += 1
+                stats[cur]["refundsPrice"]["day"] += sale.price
             else:
-                sales["day"] += 1
-                sales["week"] += 1
-                sales["month"] += 1
-                salesPrice["day"] += sale.price
-                salesPrice["week"] += sale.price
-                salesPrice["month"] += sale.price
-        elif "день" in date or "дня" in date or "дней" in date or "дні" in date or "day" in date or "час" in date or "hour" in date or "годин" in date:
-            if sale.status == OrderStatuses.REFUNDED:
-                refunds["week"] += 1
-                refunds["month"] += 1
-                refundsPrice["week"] += sale.price
-                refundsPrice["month"] += sale.price
+                stats[cur]["sales"]["day"] += 1
+                stats[cur]["salesPrice"]["day"] += sale.price
+        if delta <= datetime.timedelta(days=7):
+            if is_refund:
+                stats[cur]["refunds"]["week"] += 1
+                stats[cur]["refundsPrice"]["week"] += sale.price
             else:
-                sales["week"] += 1
-                sales["month"] += 1
-                salesPrice["week"] += sale.price
-                salesPrice["month"] += sale.price
-        elif "недел" in date or "тижд" in date or "week" in date:
-            if sale.status == OrderStatuses.REFUNDED:
-                refunds["month"] += 1
-                refundsPrice["month"] += sale.price
+                stats[cur]["sales"]["week"] += 1
+                stats[cur]["salesPrice"]["week"] += sale.price
+        if delta <= datetime.timedelta(days=30):
+            if is_refund:
+                stats[cur]["refunds"]["month"] += 1
+                stats[cur]["refundsPrice"]["month"] += sale.price
             else:
-                sales["month"] += 1
-                salesPrice["month"] += sale.price
+                stats[cur]["sales"]["month"] += 1
+                stats[cur]["salesPrice"]["month"] += sale.price
 
 
+
+    # Формируем блоки статистики по валютам
+    sales_blocks = []
+    refunds_blocks = []
+    for cur in currencies:
+        # Показываем только если есть данные по всем времени
+        if stats[cur]["sales"]["all"] or stats[cur]["refunds"]["all"]:
+            s = stats[cur]["sales"]
+            sp = stats[cur]["salesPrice"]
+            r = stats[cur]["refunds"]
+            rp = stats[cur]["refundsPrice"]
+            curr_sym = sym[cur]
+            sales_blocks.append(
+                f"<b>{curr_sym}</b>\n"
+                f"<b>За день:</b> <code>{s['day']} ({sp['day']:.1f} {curr_sym})</code>\n"
+                f"<b>За неделю:</b> <code>{s['week']} ({sp['week']:.1f} {curr_sym})</code>\n"
+                f"<b>За месяц:</b> <code>{s['month']} ({sp['month']:.1f} {curr_sym})</code>\n"
+                f"<b>За всё время:</b> <code>{s['all']} ({sp['all']:.1f} {curr_sym})</code>"
+            )
+            refunds_blocks.append(
+                f"<b>{curr_sym}</b>\n"
+                f"<b>За день:</b> <code>{r['day']} ({rp['day']:.1f} {curr_sym})</code>\n"
+                f"<b>За неделю:</b> <code>{r['week']} ({rp['week']:.1f} {curr_sym})</code>\n"
+                f"<b>За месяц:</b> <code>{r['month']} ({rp['month']:.1f} {curr_sym})</code>\n"
+                f"<b>За всё время:</b> <code>{r['all']} ({rp['all']:.1f} {curr_sym})</code>"
+            )
+
+    sales_text = "\n\n".join(sales_blocks) if sales_blocks else "<i>Нет данных</i>"
+    refunds_text = "\n\n".join(refunds_blocks) if refunds_blocks else "<i>Нет данных</i>"
 
     return f"""Статистика аккаунта <b><i>{account.username}</i></b>
 
 <b>ID:</b> <code>{account.id}</code>
-<b>Баланс:</b> <code>{balance} {currency}</code>
+<b>Баланс:</b> <code>{balance_display} {currency}</code>
 <b>Незавершенных заказов:</b> <code>{account.active_sales}</code>
 
 <b>Доступно для вывода</b>
@@ -436,17 +521,11 @@ def generate_adv_profile(vertex: Vertex) -> str:
 <b>Через день:</b> <code>+{"{:.1f}".format(canWithdraw["day"])} {currency}</code>
 <b>Через 2 дня:</b> <code>+{"{:.1f}".format(canWithdraw["2day"])} {currency}</code>
 
-<b>Товаров продано</b>
-<b>За день:</b> <code>{sales["day"]} ({"{:.1f}".format(salesPrice["day"])} {currency})</code>
-<b>За неделю:</b> <code>{sales["week"]} ({"{:.1f}".format(salesPrice["week"])} {currency})</code>
-<b>За месяц:</b> <code>{sales["month"]} ({"{:.1f}".format(salesPrice["month"])} {currency})</code>
-<b>За всё время:</b> <code>{sales["all"]} ({"{:.1f}".format(salesPrice["all"])} {currency})</code>
+<b>Товаров продано (по валютам)</b>
+{sales_text}
 
-<b>Товаров возвращено</b>
-<b>За день:</b> <code>{refunds["day"]} ({"{:.1f}".format(refundsPrice["day"])} {currency})</code>
-<b>За неделю:</b> <code>{refunds["week"]} ({"{:.1f}".format(refundsPrice["week"])} {currency})</code>
-<b>За месяц:</b> <code>{refunds["month"]} ({"{:.1f}".format(refundsPrice["month"])} {currency})</code>
-<b>За всё время:</b> <code>{refunds["all"]} ({"{:.1f}".format(refundsPrice["all"])} {currency})</code>
+<b>Товаров возвращено (по валютам)</b>
+{refunds_text}
 
 <i>Обновлено:</i>  <code>{time.strftime('%H:%M:%S', time.localtime(account.last_update))}</code>"""
 

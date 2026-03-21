@@ -274,17 +274,44 @@ class Vertex(object):
         self.telegram.init()
 
     def get_balance(self, attempts: int = 3) -> FunPayAPI.types.Balance:
+        """
+        Возвращает баланс аккаунта. Безопасно обрабатывает отсутствие лотов.
+
+        Алгоритм:
+        - Пытаемся получить публичные лоты из случайной подкатегории несколько раз.
+        - Если лотов нет вовсе, пробуем запросить баланс на offer?id=0.
+        - Если и это не удалось — возвращаем нулевой баланс (чтобы не падать в /profile).
+        """
         subcategories = self.account.get_sorted_subcategories()[FunPayAPI.enums.SubCategoryTypes.COMMON]
-        lots = []
-        while not lots and attempts:
+        lots: list[FunPayAPI.types.LotShortcut] = []
+        tried_subcats = set()
+        while attempts and len(tried_subcats) < len(subcategories):
             attempts -= 1
-            subcat_id = random.choice(list(subcategories.keys()))
-            lots = self.account.get_subcategory_public_lots(FunPayAPI.enums.SubCategoryTypes.COMMON, subcat_id)
-            break
-        else:
-            raise Exception(...)
-        balance = self.account.get_balance(random.choice(lots).id)
-        return balance
+            try:
+                subcat_id = random.choice([i for i in subcategories.keys() if i not in tried_subcats])
+            except IndexError:
+                break
+            tried_subcats.add(subcat_id)
+            try:
+                lots = self.account.get_subcategory_public_lots(FunPayAPI.enums.SubCategoryTypes.COMMON, subcat_id)
+                if lots:
+                    break
+            except Exception:
+                continue
+
+        # Если нашли лоты — используем любой для получения баланса
+        if lots:
+            try:
+                return self.account.get_balance(random.choice(lots).id)
+            except Exception:
+                pass
+
+        # Фоллбек: пробуем offer?id=0 (часто достаточно для получения баланса)
+        try:
+            return self.account.get_balance(0)
+        except Exception:
+            # Возвращаем нулевой баланс как безопасный дефолт
+            return FunPayAPI.types.Balance(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     # Прочее
     def raise_lots(self) -> int:
