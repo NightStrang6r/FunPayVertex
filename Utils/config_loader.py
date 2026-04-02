@@ -81,7 +81,8 @@ def load_main_config(config_path: str):
         "Telegram": {
             "enabled": ["0", "1"],
             "token": "any+empty",
-            "secretKey": "any"
+            "secretKey": "any",
+            "proxy": "any+empty"
         },
 
         "BlockList": {
@@ -162,6 +163,10 @@ def load_main_config(config_path: str):
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
             # END OF UPDATE 009
+            elif section_name == "Telegram" and param_name == "proxy" and param_name not in config[section_name]:
+                config.set("Telegram", "proxy", "")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
 
             try:
                 if values[section_name][param_name] == "any":

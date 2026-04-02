@@ -23,7 +23,8 @@ default_config = {
     "Telegram": {
         "enabled": "0",
         "token": "",
-        "secretKey": "СекретныйПароль"
+        "secretKey": "СекретныйПароль",
+        "proxy": ""
     },
 
     "BlockList": {

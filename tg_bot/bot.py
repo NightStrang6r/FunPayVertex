@@ -34,6 +34,10 @@ class TGBot:
         self.bot = telebot.TeleBot(self.vertex.MAIN_CFG["Telegram"]["token"], parse_mode="HTML",
                                    allow_sending_without_reply=True, num_threads=5)
 
+        tg_proxy = self.vertex.MAIN_CFG["Telegram"].get("proxy", "").strip()
+        if tg_proxy:
+            telebot.apihelper.proxy = {"https": tg_proxy}
+
         self.file_handlers = {}  # хэндлеры, привязанные к получению файла.
         self.attempts = {}  # {user_id: attempts} - попытки авторизации в Telegram ПУ.
         self.init_messages = []  # [(chat_id, message_id)] - список сообщений о запуске TG бота.
