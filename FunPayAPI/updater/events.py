@@ -21,7 +21,7 @@ class BaseEvent:
     def __init__(self, runner_tag: str, event_type: EventTypes, event_time: int | float | None = None):
         self.runner_tag = runner_tag
         self.type = event_type
-        self.time = event_time if event_type is not None else time.time()
+        self.time = event_time if event_time is not None else time.time()
 
 
 class InitialChatEvent(BaseEvent):

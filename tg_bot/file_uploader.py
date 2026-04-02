@@ -20,6 +20,10 @@ import os
 logger = logging.getLogger("TGBot")
 
 
+def sanitize_file_name(file_name: str) -> str:
+    return os.path.basename(file_name)
+
+
 def check_file(tg: TGBot, msg: types.Message) -> bool:
     """
     Проверяет выгруженный файл. Чистит состояние пользователя. Отправляет сообщение в TG в зависимости от ошибки.
@@ -67,6 +71,7 @@ def download_file(tg: TGBot, msg: types.Message, file_name: str = "temp_file.txt
         logger.debug("TRACEBACK", exc_info=True)
         return False
 
+    file_name = sanitize_file_name(file_name)
     path = f"storage/cache/{file_name}" if not custom_path else os.path.join(custom_path, file_name)
     with open(path, "wb") as new_file:
         new_file.write(file)
@@ -90,27 +95,28 @@ def init_uploader(vertex: Vertex):
         tg.clear_state(m.chat.id, m.from_user.id, True)
         if not check_file(tg, m):
             return
-        if not download_file(tg, m, m.document.file_name,
+        safe_file_name = sanitize_file_name(m.document.file_name)
+        if not download_file(tg, m, safe_file_name,
                              custom_path=f"storage/products"):
             return
 
         try:
-            products_count = vertex_tools.count_products(f"storage/products/{utils.escape(m.document.file_name)}")
+            products_count = vertex_tools.count_products(f"storage/products/{safe_file_name}")
         except:
             bot.send_message(m.chat.id, "❌ Произошла ошибка при подсчете товаров.")
             logger.debug("TRACEBACK", exc_info=True)
             return
 
-        file_number = os.listdir("storage/products").index(m.document.file_name)
+        file_number = os.listdir("storage/products").index(safe_file_name)
 
         keyboard = types.InlineKeyboardMarkup() \
             .add(Button("✏️ Редактировать файл", callback_data=f"{CBT.EDIT_PRODUCTS_FILE}:{file_number}:0"))
 
         logger.info(f"Пользователь $MAGENTA@{m.from_user.username} (id: {m.from_user.id})$RESET "
-                    f"загрузил в бота файл с товарами $YELLOWstorage/products/{m.document.file_name}$RESET.")
+                    f"загрузил в бота файл с товарами $YELLOWstorage/products/{safe_file_name}$RESET.")
 
         bot.send_message(m.chat.id,
-                         f"✅ Файл с товарами <code>storage/products/{m.document.file_name}</code> успешно загружен. "
+                         f"✅ Файл с товарами <code>storage/products/{utils.escape(safe_file_name)}</code> успешно загружен. "
                          f"Товаров в файле: <code>{products_count}.</code>",
                          reply_markup=keyboard)
 
@@ -132,7 +138,7 @@ def init_uploader(vertex: Vertex):
 
         bot.send_message(m.chat.id, "🔁 Проверяю валидность файла...")
         try:
-            new_config = cfg_loader.load_main_config("storage/cache/temp_main.cfg")
+            new_config = cfg_loader.load_main_config("storage/cache/temp_main.cfg", update_missing=False)
         except excs.ConfigParseError as e:
             bot.send_message(m.chat.id, f"❌ Произошла ошибка при обработке основного конфига: "
                                         f"<code>{utils.escape(str(e))}</code>")
@@ -239,17 +245,18 @@ def init_uploader(vertex: Vertex):
         offset = tg.get_state(m.chat.id, m.from_user.id)["data"]["offset"]
         if not check_file(tg, m):
             return
-        if not download_file(tg, m, f"{utils.escape(m.document.file_name)}",
+        safe_file_name = sanitize_file_name(m.document.file_name)
+        if not download_file(tg, m, safe_file_name,
                              custom_path=f"plugins"):
             return
 
         logger.info(f"Пользователь $MAGENTA@{m.from_user.username} (id: {m.from_user.id})$RESET "
-                    f"загрузил в бота плагин $YELLOWplugins/{m.document.file_name}$RESET.")
+                    f"загрузил в бота плагин $YELLOWplugins/{safe_file_name}$RESET.")
 
         keyboard = types.InlineKeyboardMarkup() \
             .add(Button("◀️Назад", callback_data=f"{CBT.PLUGINS_LIST}:{offset}"))
         bot.send_message(m.chat.id,
-                         f"✅ Плагин <code>{utils.escape(m.document.file_name)}</code> успешно загружен.\n\n"
+                         f"✅ Плагин <code>{utils.escape(safe_file_name)}</code> успешно загружен.\n\n"
                          f"⚠️Чтобы плагин активировался, <u><b>перезагрузите FPV!</b></u> (/restart)",
                          reply_markup=keyboard)
 

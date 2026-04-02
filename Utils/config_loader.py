@@ -5,10 +5,14 @@ import configparser
 from configparser import ConfigParser, SectionProxy
 import codecs
 import os
+import re
 
 from Utils.exceptions import (ParamNotFoundError, EmptyValueError, ValueNotValidError, SectionNotFoundError,
                               ConfigParseError, ProductsFileNotFoundError, NoProductVarError,
                               SubCommandAlreadyExists, DuplicateSectionErrorWrapper)
+
+
+GOLDEN_KEY_RE = re.compile(r"^\S{32}$")
 
 
 def check_param(param_name: str, section: SectionProxy, valid_values: list[str | None] | None = None,
@@ -56,7 +60,26 @@ def create_config_obj(config_path: str) -> ConfigParser:
     return config
 
 
-def load_main_config(config_path: str):
+def _ensure_main_config_defaults(config: ConfigParser) -> bool:
+    updated = False
+    default_params = (
+        ("FunPay", "oldMsgGetMode", "0"),
+        ("Greetings", "ignoreSystemMessages", "0"),
+        ("Other", "language", "ru"),
+        ("Telegram", "proxy", ""),
+    )
+
+    for section_name, param_name, default_value in default_params:
+        if section_name not in config.sections():
+            continue
+        if param_name in config[section_name]:
+            continue
+        config.set(section_name, param_name, default_value)
+        updated = True
+    return updated
+
+
+def load_main_config(config_path: str, update_missing: bool = False):
     """
     Парсит и проверяет на правильность основной конфиг.
 
@@ -143,31 +166,13 @@ def load_main_config(config_path: str):
         }
     }
 
+    updated = _ensure_main_config_defaults(config)
+
     for section_name in values:
         if section_name not in config.sections():
             raise ConfigParseError(config_path, section_name, SectionNotFoundError())
 
         for param_name in values[section_name]:
-
-            # UPDATE 009
-            if section_name == "FunPay" and param_name == "oldMsgGetMode" and param_name not in config[section_name]:
-                config.set("FunPay", "oldMsgGetMode", "0")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-            elif section_name == "Greetings" and param_name == "ignoreSystemMessages" and param_name not in config[section_name]:
-                config.set("Greetings", "ignoreSystemMessages", "0")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-            elif section_name == "Other" and param_name == "language" and param_name not in config[section_name]:
-                config.set("Other", "language", "ru")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-            # END OF UPDATE 009
-            elif section_name == "Telegram" and param_name == "proxy" and param_name not in config[section_name]:
-                config.set("Telegram", "proxy", "")
-                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
-                    config.write(f)
-
             try:
                 if values[section_name][param_name] == "any":
                     check_param(param_name, config[section_name])
@@ -177,6 +182,21 @@ def load_main_config(config_path: str):
                     check_param(param_name, config[section_name], valid_values=values[section_name][param_name])
             except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
                 raise ConfigParseError(config_path, section_name, e)
+
+    golden_key = config["FunPay"]["golden_key"].strip()
+    if not GOLDEN_KEY_RE.fullmatch(golden_key):
+        raise ConfigParseError(config_path, "FunPay", ValueNotValidError("golden_key", golden_key, ["32 non-space characters"]))
+
+    if config["Telegram"].getboolean("enabled"):
+        try:
+            check_param("token", config["Telegram"])
+            check_param("secretKey", config["Telegram"])
+        except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
+            raise ConfigParseError(config_path, "Telegram", e)
+
+    if update_missing and updated:
+        with open(config_path, "w", encoding="utf-8") as f:
+            config.write(f)
 
     return config
 

@@ -75,7 +75,7 @@ if not os.path.exists("configs/_main.cfg"):
 
 try:
     logger.info("$MAGENTAЗагружаю конфиг _main.cfg...")
-    MAIN_CFG = cfg_loader.load_main_config("configs/_main.cfg")
+    MAIN_CFG = cfg_loader.load_main_config("configs/_main.cfg", update_missing=True)
     localizer = Localizer(MAIN_CFG["Other"]["language"])
     _ = localizer.translate
 
