@@ -13,7 +13,7 @@ import datetime
 import os.path
 import json
 import time
-import json
+import logging
 from os.path import exists
 from FunPayAPI.common.utils import RegularExpressions
 from bs4 import BeautifulSoup as bs
@@ -28,6 +28,8 @@ _ = localizer.translate
 import Utils.vertex_tools
 from tg_bot import CBT
 import re
+
+logger = logging.getLogger("TGBot")
 
 
 class NotificationTypes:
@@ -70,11 +72,7 @@ def load_authorized_users() -> list[int]:
 
     :return: список из id авторизированных пользователей.
     """
-    if not os.path.exists("storage/cache/tg_authorized_users.json"):
-        return []
-    with open("storage/cache/tg_authorized_users.json", "r", encoding="utf-8") as f:
-        data = f.read()
-    return json.loads(data)
+    return load_json_cache("storage/cache/tg_authorized_users.json", [])
 
 
 def load_notification_settings() -> dict:
@@ -83,10 +81,7 @@ def load_notification_settings() -> dict:
 
     :return: настройки Telegram уведомлений.
     """
-    if not os.path.exists("storage/cache/notifications.json"):
-        return {}
-    with open("storage/cache/notifications.json", "r", encoding="utf-8") as f:
-        return json.loads(f.read())
+    return load_json_cache("storage/cache/notifications.json", {})
 
 
 def load_answer_templates() -> list[str]:
@@ -95,10 +90,19 @@ def load_answer_templates() -> list[str]:
 
     :return: шаблоны ответов из кэша.
     """
-    if not os.path.exists("storage/cache/answer_templates.json"):
-        return []
-    with open("storage/cache/answer_templates.json", "r", encoding="utf-8") as f:
-        return json.loads(f.read())
+    return load_json_cache("storage/cache/answer_templates.json", [])
+
+
+def load_json_cache(path: str, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.loads(f.read())
+    except (OSError, json.JSONDecodeError):
+        logger.warning(f"Не удалось загрузить JSON-кэш {path}. Использую значение по умолчанию.")
+        logger.debug("TRACEBACK", exc_info=True)
+        return default
 
 
 def save_authorized_users(users: list[int]) -> None:
@@ -362,9 +366,8 @@ def generate_adv_profile(vertex: Vertex) -> str:
     else:
         currency, balance_value = "₽", 0.0
     if exists("storage/cache/advProfileStat.json"):
-        with open("storage/cache/advProfileStat.json", "r", encoding="utf-8") as f:
-            global ORDER_CONFIRMED
-            ORDER_CONFIRMED = json.loads(f.read())
+        global ORDER_CONFIRMED
+        ORDER_CONFIRMED = load_json_cache("storage/cache/advProfileStat.json", {})
     sales = {"day": 0, "week": 0, "month": 0, "all": 0}
     salesPrice = {"day": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
     refunds = {"day": 0, "week": 0, "month": 0, "all": 0}

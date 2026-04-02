@@ -8,15 +8,19 @@ common_packages = [
     "requests==2.28.1",
     "pytelegrambotapi==4.8.0",
     "pillow>=9.3.0",
-    "aiohttp==3.8.3",
+    "aiohttp>=3.9.5",
     "requests_toolbelt==0.10.1",
     "PySocks>=1.7.1"
 ]
 
 
 def install_packages(packages_list: list[str]):
+    failed_packages = []
     for pkg in packages_list:
-        main(["install", "-U", pkg])
+        if main(["install", "-U", pkg]):
+            failed_packages.append(pkg)
+    if failed_packages:
+        raise SystemExit(f"Failed to install packages: {', '.join(failed_packages)}")
 
 
 if __name__ == '__main__':
