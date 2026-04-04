@@ -406,10 +406,14 @@ def get_lot_config_by_name(c: Vertex, name: str) -> configparser.SectionProxy | 
 
     :return: секцию конфига или None.
     """
-    for i in c.AD_CFG.sections():
-        if i in name:
-            return c.AD_CFG[i]
-    return None
+    matched_section_name = None
+    lot_name = name.casefold()
+    for section_name in c.AD_CFG.sections():
+        if section_name.casefold() not in lot_name:
+            continue
+        if matched_section_name is None or len(section_name) > len(matched_section_name):
+            matched_section_name = section_name
+    return c.AD_CFG[matched_section_name] if matched_section_name else None
 
 
 def check_products_amount(config_obj: configparser.SectionProxy) -> int:
@@ -417,6 +421,10 @@ def check_products_amount(config_obj: configparser.SectionProxy) -> int:
     if not file_name:
         return 1
     return vertex_tools.count_products(f"storage/products/{file_name}")
+
+
+def is_auto_delivery_disabled(config_obj: configparser.SectionProxy) -> bool:
+    return config_obj.get("disable") == "1" or config_obj.get("disableAutoDelivery") == "1"
 
 
 def update_current_lots_handler(c: Vertex, e: OrdersListChangedEvent):
@@ -446,13 +454,8 @@ def log_new_order_handler(c: Vertex, e: NewOrderEvent, *args):
 
 
 def setup_event_attributes_handler(c: Vertex, e: NewOrderEvent, *args):
-    config_section_name = None
-    config_section_obj = None
-    for lot_name in c.AD_CFG:
-        if lot_name in e.order.description:
-            config_section_obj = c.AD_CFG[lot_name]
-            config_section_name = lot_name
-            break
+    config_section_obj = get_lot_config_by_name(c, e.order.description)
+    config_section_name = config_section_obj.name if config_section_obj else None
 
     attributes = {"config_section_name": config_section_name, "config_section_obj": config_section_obj,
                   "delivered": False, "delivery_text": None, "goods_delivered": 0, "goods_left": None,
@@ -479,7 +482,7 @@ def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
     else:
         if not c.autodelivery_enabled:
             delivery_info = _("ntfc_new_order_ad_disabled")
-        elif config_obj.getboolean("disable"):
+        elif is_auto_delivery_disabled(config_obj):
             delivery_info = _("ntfc_new_order_ad_disabled_for_lot")
         elif c.bl_delivery_enabled and e.order.buyer_username in c.blacklist:
             delivery_info = _("ntfc_new_order_user_blocked")
@@ -542,7 +545,7 @@ def deliver_product_handler(c: Vertex, e: NewOrderEvent, *args) -> None:
 
     if (config_section_obj := getattr(e, "config_section_obj")) is None:
         return
-    if config_section_obj.getboolean("disable"):
+    if is_auto_delivery_disabled(config_section_obj):
         logger.info(f"Для лота \"{e.order.description}\" отключена автовыдача.")
         return
 

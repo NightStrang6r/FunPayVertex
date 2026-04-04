@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.pyc
+venv/
+venv2/
+logs/
+storage/
+configs/
+.idea/
+build/
+dist/
+other/

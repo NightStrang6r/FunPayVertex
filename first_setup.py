@@ -87,11 +87,13 @@ default_config = {
 
 
 def create_configs():
+    os.makedirs("configs", exist_ok=True)
+
     if not os.path.exists("configs/auto_response.cfg"):
         with open("configs/auto_response.cfg", "w", encoding="utf-8"):
             ...
 
-    if not os.path.exists("configs/auto_response.cfg"):
+    if not os.path.exists("configs/auto_delivery.cfg"):
         with open("configs/auto_delivery.cfg", "w", encoding="utf-8"):
             ...
 
@@ -111,6 +113,7 @@ def create_config_obj(settings) -> ConfigParser:
 
 
 def first_setup():
+    create_configs()
     config = create_config_obj(default_config)
     sleep_time = 1
 
@@ -128,14 +131,14 @@ def first_setup():
               f"Для начала введи токен (golden_key) твоего FunPay аккаунта {Fore.RED}(._.){Style.RESET_ALL}")
         golden_key = input(f"{Fore.MAGENTA}{Style.BRIGHT}└───> {Style.RESET_ALL}").strip()
         if len(golden_key) != 32:
-            print(f"\n{Fore.CYAN}{Style.BRIGHT}Неверный формат токена. Попробуй еще раз! {Fore.RED}\(!!˚0˚)/{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}{Style.BRIGHT}Неверный формат токена. Попробуй еще раз! {Fore.RED}\\(!!˚0˚)/{Style.RESET_ALL}")
             continue
         config.set("FunPay", "golden_key", golden_key)
         break
 
     print(f"\n{Fore.MAGENTA}{Style.BRIGHT}┌── {Fore.CYAN}"
           f"Если хочешь, ты можешь указать свой User-agent. Если ты не знаешь, что это такое, просто нажми Enter. "
-          f"{Fore.RED}¯\(°_o)/¯{Style.RESET_ALL}")
+          f"{Fore.RED}¯\\(°_o)/¯{Style.RESET_ALL}")
     user_agent = input(f"{Fore.MAGENTA}{Style.BRIGHT}└───> {Style.RESET_ALL}").strip()
     if user_agent:
         config.set("FunPay", "user_agent", user_agent)
@@ -146,7 +149,7 @@ def first_setup():
 
         tg = input(f"{Fore.MAGENTA}{Style.BRIGHT}└───> {Style.RESET_ALL}").strip()
         if tg not in ["0", "1"]:
-            print(f"\n{Fore.CYAN}{Style.BRIGHT}Не понял тебя... Попробуй еще раз! {Fore.RED}\(!!˚0˚)/{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}{Style.BRIGHT}Не понял тебя... Попробуй еще раз! {Fore.RED}\\(!!˚0˚)/{Style.RESET_ALL}")
             continue
         if tg == "1":
             while True:
@@ -154,7 +157,7 @@ def first_setup():
                       f" {Fore.RED}(._.){Style.RESET_ALL}")
                 token = input(f"{Fore.MAGENTA}{Style.BRIGHT}└───> {Style.RESET_ALL}").strip()
                 if not token:
-                    print(f"\n{Fore.CYAN}{Style.BRIGHT}Попробуй еще раз! {Fore.RED}\(!!˚0˚)/{Style.RESET_ALL}")
+                    print(f"\n{Fore.CYAN}{Style.BRIGHT}Попробуй еще раз! {Fore.RED}\\(!!˚0˚)/{Style.RESET_ALL}")
                     continue
                 break
 
@@ -163,7 +166,7 @@ def first_setup():
                       f" {Fore.RED}ᴖ̮ ̮ᴖ{Style.RESET_ALL}")
                 password = input(f"{Fore.MAGENTA}{Style.BRIGHT}└───> {Style.RESET_ALL}").strip()
                 if not password:
-                    print(f"\n{Fore.CYAN}{Style.BRIGHT}Попробуй еще раз! {Fore.RED}\(!!˚0˚)/{Style.RESET_ALL}")
+                    print(f"\n{Fore.CYAN}{Style.BRIGHT}Попробуй еще раз! {Fore.RED}\\(!!˚0˚)/{Style.RESET_ALL}")
                     continue
                 break
 

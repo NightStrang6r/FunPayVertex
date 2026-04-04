@@ -16,7 +16,6 @@ import re
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from typing import Any, Literal
 
 from . import types
 from .common import exceptions, utils, enums
@@ -91,6 +90,7 @@ class Account:
 
         self.__bot_character = "⁤"
         """Если сообщение начинается с этого символа, значит оно отправлено ботом."""
+        self.max_rate_limit_retries = 3
 
         self.session = requests.Session()
         retry_strategy = Retry(
@@ -132,26 +132,36 @@ class Account:
         :return: объект ответа.
         :rtype: :class:`requests.Response`
         """
-        headers["cookie"] = f"golden_key={self.golden_key}"
-        headers["cookie"] += f"; PHPSESSID={self.phpsessid}" if self.phpsessid and not exclude_phpsessid else ""
+        # Pass cookies via the dedicated requests API so they survive redirects
+        # from https://funpay.com to locale-specific paths like /uk/.
+        cookies = {"golden_key": self.golden_key}
+        if self.phpsessid and not exclude_phpsessid:
+            cookies["PHPSESSID"] = self.phpsessid
+        headers = headers.copy()
         if self.user_agent:
             headers["user-agent"] = self.user_agent
         link = api_method if api_method.startswith("https://funpay.com") else "https://funpay.com/" + api_method
-        
-        while True:
+        response = None
+        for attempt in range(self.max_rate_limit_retries + 1):
             response = self.session.request(
                 method=request_method,
                 url=link,
                 headers=headers,
+                cookies=cookies,
                 data=payload,
                 timeout=self.requests_timeout,
                 proxies=self.proxy or {}
             )
-            if response.status_code == 429:
-                time.sleep(0.4)
-                continue
-            break
-            
+            if response.status_code != 429 or attempt == self.max_rate_limit_retries:
+                break
+
+            retry_after = response.headers.get("Retry-After")
+            try:
+                sleep_time = max(float(retry_after), 0.4) if retry_after is not None else 0.4
+            except ValueError:
+                sleep_time = 0.4
+            time.sleep(sleep_time)
+
         if response.status_code == 403:
             raise exceptions.UnauthorizedError(response)
         elif response.status_code != 200 and raise_not_200:
@@ -198,7 +208,7 @@ class Account:
 
         cookies = response.cookies.get_dict()
         if update_phpsessid or not self.phpsessid:
-            self.phpsessid = cookies["PHPSESSID"]
+            self.phpsessid = cookies.get("PHPSESSID") or self.session.cookies.get("PHPSESSID")
         if not self.is_initiated:
             self.__setup_categories(html_response)
 
@@ -1035,6 +1045,8 @@ class Account:
                 day, month = int(day), utils.MONTHS[month]
                 h, m = split[1].split(":")
                 order_date = datetime(now.year, month, day, int(h), int(m))
+                if order_date > now + timedelta(days=1):
+                    order_date = order_date.replace(year=order_date.year - 1)
             else:  # ДД месяца ГГГГ, ЧЧ:ММ
                 split = order_date_text.split(", ")
                 day, month, year = split[0].split()
@@ -1623,7 +1635,7 @@ class Account:
                         interlocutor_username = author
                         ids[interlocutor_id] = interlocutor_username
 
-            if self.chat_id_private and (image_link := parser.find("a", {"class": "chat-img-link"})):
+            if self.chat_id_private(chat_id) and (image_link := parser.find("a", {"class": "chat-img-link"})):
                 image_link = image_link.get("href")
                 message_text = None
             else:

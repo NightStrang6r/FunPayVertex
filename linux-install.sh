@@ -37,10 +37,6 @@ cd ~
 
 echo -e "${GREEN}Установка Python 3.11 и зависимостей...${NC}"
 sudo apt install -y python3.11 python3.11-dev python3.11-gdbm python3.11-venv
-wget https://bootstrap.pypa.io/get-pip.py -nc
-sudo python3.11 get-pip.py
-
-rm -rf get-pip.py
 
 echo -e "${GREEN}Установка git...${NC}"
 sudo apt install -y git
@@ -48,32 +44,31 @@ sudo apt install -y git
 sudo rm -rf FunPayVertex
 
 echo -e "${GREEN}Клонирование репозитория FunPayVertex...${NC}"
-git clone https://github.com/NightStrang6r/FunPayVertex
+git clone https://github.com/slonce70/FunPayVertex
 
 echo -e "${GREEN}Переход в директорию проекта...${NC}"
 cd FunPayVertex
 
-echo -e "${GREEN}Установка зависимостей бота...${NC}"
-sudo python3.11 setup.py
+echo -e "${GREEN}Создание виртуального окружения...${NC}"
+python3.11 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+
+echo -e "${GREEN}Установка зависимостей бота в виртуальное окружение...${NC}"
+python setup.py
 
 echo -e "${GREEN}Сейчас необходимо выполнить первичную установку${NC}"
-sudo python3.11 main.py
+python main.py
 
 echo -e "${GREEN}Ок, теперь добавим бота как фоновый процесс${NC}"
 
-echo -e "${GREEN}Установка curl...${NC}"
-sudo apt-get install -y curl
-
-echo -e "${GREEN}Загрузка NodeJS...${NC}"
-curl -sL https://deb.nodesource.com/setup_16.x | sudo bash -
-
-echo -e "${GREEN}Установка NodeJS...${NC}"
-sudo apt -y install nodejs
+echo -e "${GREEN}Установка NodeJS и npm...${NC}"
+sudo apt install -y nodejs npm
 
 echo -e "${GREEN}Установка pm2...${NC}"
 sudo npm install -g pm2
 
-pm2 start main.py --interpreter=python3.11 --name=FunPayVertex
+pm2 start main.py --interpreter="$HOME/FunPayVertex/venv/bin/python" --name=FunPayVertex
 pm2 save
 pm2 startup
 

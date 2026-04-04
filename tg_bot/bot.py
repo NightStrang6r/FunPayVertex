@@ -89,6 +89,9 @@ class TGBot:
             utils.NotificationTypes.announcement: 1
         }
 
+    def get_default_notification_settings(self) -> dict[str, int]:
+        return self.__default_notification_settings.copy()
+
     # User states
     def get_state(self, chat_id: int, user_id: int) -> dict | None:
         """
@@ -266,7 +269,7 @@ class TGBot:
         if str(m.chat.id) in self.notification_settings:
             return
         if m.chat.type != "private" or m.chat.id in self.authorized_users:
-            self.notification_settings[str(m.chat.id)] = self.__default_notification_settings
+            self.notification_settings[str(m.chat.id)] = self.get_default_notification_settings()
             utils.save_notification_settings(self.notification_settings)
 
     def reg_admin(self, m: Message):
@@ -279,7 +282,7 @@ class TGBot:
             self.authorized_users.append(m.from_user.id)
             utils.save_authorized_users(self.authorized_users)
             if str(m.chat.id) not in self.notification_settings:
-                self.notification_settings[str(m.chat.id)] = self.__default_notification_settings
+                self.notification_settings[str(m.chat.id)] = self.get_default_notification_settings()
                 utils.save_notification_settings(self.notification_settings)
             text = _("access_granted")
             logger.warning(_("log_access_granted", m.from_user.username, m.from_user.id))
@@ -324,13 +327,14 @@ class TGBot:
         except:
             self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
             logger.debug("TRACEBACK", exc_info=True)
-            self.bot.answer_callback_query(m.id)
             return
         
     def update_profile(self, c: CallbackQuery):
         """
         Обновляет статистику аккаунта.
         """
+        # Подтверждаем callback сразу, чтобы убрать спиннер у пользователя
+        self.bot.answer_callback_query(c.id)
         new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
         try:
             self.vertex.account.get()
@@ -345,26 +349,39 @@ class TGBot:
         except:
             self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
             logger.debug("TRACEBACK", exc_info=True)
-            self.bot.answer_callback_query(c.id)
             return
 
     def change_cookie(self, m: telebot.types.Message):
-        if len(m.text.split(" ")) == 2:
-            if len(m.text.split(" ")[1]) != 32:
-                self.bot.send_message(m.chat.id, "Неверный формат токена. Попробуй еще раз!")
-                return
-            self.vertex.account.golden_key = m.text.split(" ")[1]
-            self.vertex.MAIN_CFG.set("FunPay", "golden_key", m.text.split(" ")[1])
-            self.vertex.save_config(self.vertex.MAIN_CFG, "configs/_main.cfg")
-            self.vertex.account.get(True)
-            self.bot.send_message(m.chat.id, "✅ Успешно изменено перезапустите бота.")
-        else:
+        parts = m.text.split(maxsplit=1)
+        if len(parts) != 2:
             self.bot.send_message(m.chat.id, "Команда введена не правильно! /change_cookie [golden_key]")
+            return
+
+        new_golden_key = parts[1].strip()
+        if len(new_golden_key) != 32:
+            self.bot.send_message(m.chat.id, "Неверный формат токена. Попробуй еще раз!")
+            return
+
+        old_golden_key = self.vertex.account.golden_key
+        self.vertex.account.golden_key = new_golden_key
+        try:
+            self.vertex.account.get(True)
+        except:
+            self.vertex.account.golden_key = old_golden_key
+            self.bot.send_message(m.chat.id, "❌ Не удалось проверить новый golden_key. Старый ключ сохранен.")
+            logger.debug("TRACEBACK", exc_info=True)
+            return
+
+        self.vertex.MAIN_CFG.set("FunPay", "golden_key", new_golden_key)
+        self.vertex.save_config(self.vertex.MAIN_CFG, "configs/_main.cfg")
+        self.bot.send_message(m.chat.id, "✅ Успешно изменено перезапустите бота.")
 
     def update_adv_profile(self, c: CallbackQuery):
         """
         Обновляет дополнительную статистику аккаунта.
         """
+        # Подтверждаем callback сразу, чтобы убрать спиннер у пользователя
+        self.bot.answer_callback_query(c.id)
         new_msg = self.bot.send_message(c.message.chat.id, _("updating_profile"))
         try:
             self.vertex.account.get()
@@ -379,7 +396,6 @@ class TGBot:
         except:
             self.bot.edit_message_text(_("profile_updating_error"), new_msg.chat.id, new_msg.id)
             logger.debug("TRACEBACK", exc_info=True)
-            self.bot.answer_callback_query(c.id)
             return
 
     def send_orders(self, m: telebot.types.Message):
@@ -793,6 +809,8 @@ class TGBot:
         node_id, username, order_id, no_refund = int(split[1]), split[2], split[3], bool(int(split[4]))
         self.bot.edit_message_reply_markup(c.message.chat.id, c.message.id,
                                            reply_markup=kb.new_order(order_id, username, node_id, no_refund=no_refund))
+        # Подтверждаем callback, чтобы не показывался тайм-аут в клиенте Telegram
+        self.bot.answer_callback_query(c.id)
 
     # Панель управления
     def open_cp(self, c: CallbackQuery):

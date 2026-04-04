@@ -274,17 +274,55 @@ class Vertex(object):
         self.telegram.init()
 
     def get_balance(self, attempts: int = 3) -> FunPayAPI.types.Balance:
+        """
+        Возвращает баланс аккаунта. Безопасно обрабатывает отсутствие лотов.
+
+        Алгоритм:
+        - Пытаемся получить публичные лоты из случайной подкатегории несколько раз.
+        - Если лотов нет вовсе, пробуем запросить баланс на offer?id=0.
+        - Если и это не удалось — используем кэшированный баланс или возбуждаем исходную ошибку.
+        """
         subcategories = self.account.get_sorted_subcategories()[FunPayAPI.enums.SubCategoryTypes.COMMON]
-        lots = []
-        while not lots and attempts:
+        lots: list[FunPayAPI.types.LotShortcut] = []
+        tried_subcats = set()
+        last_error = None
+        while attempts and len(tried_subcats) < len(subcategories):
             attempts -= 1
-            subcat_id = random.choice(list(subcategories.keys()))
-            lots = self.account.get_subcategory_public_lots(FunPayAPI.enums.SubCategoryTypes.COMMON, subcat_id)
-            break
-        else:
-            raise Exception(...)
-        balance = self.account.get_balance(random.choice(lots).id)
-        return balance
+            try:
+                subcat_id = random.choice([i for i in subcategories.keys() if i not in tried_subcats])
+            except IndexError:
+                break
+            tried_subcats.add(subcat_id)
+            try:
+                lots = self.account.get_subcategory_public_lots(FunPayAPI.enums.SubCategoryTypes.COMMON, subcat_id)
+                if lots:
+                    break
+            except Exception as e:
+                last_error = e
+                continue
+
+        # Если нашли лоты — используем любой для получения баланса
+        if lots:
+            try:
+                return self.account.get_balance(random.choice(lots).id)
+            except Exception as e:
+                last_error = e
+
+        # Фоллбек: пробуем offer?id=0 (часто достаточно для получения баланса)
+        try:
+            return self.account.get_balance(0)
+        except Exception as e:
+            last_error = e
+
+        if self.balance is not None:
+            logger.warning("Не удалось обновить баланс, использую последнее успешно полученное значение.")
+            logger.debug("TRACEBACK", exc_info=last_error)
+            return self.balance
+
+        if not subcategories:
+            return FunPayAPI.types.Balance(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+        raise last_error
 
     # Прочее
     def raise_lots(self) -> int:
@@ -575,7 +613,7 @@ class Vertex(object):
         Останавливает вертекс. Не используется.
         """
         self.run_id += 1
-        self.run_handlers(self.pre_start_handlers, (self, ))
+        self.run_handlers(self.pre_stop_handlers, (self, ))
         self.run_handlers(self.post_stop_handlers, (self, ))
 
     def update_lots_and_categories(self):

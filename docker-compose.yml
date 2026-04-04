@@ -6,3 +6,7 @@ services:
     container_name: funpay-vertex 
     restart: unless-stopped
     tty: true
+    volumes:
+      - ./configs:/app/configs
+      - ./storage:/app/storage
+      - ./logs:/app/logs
