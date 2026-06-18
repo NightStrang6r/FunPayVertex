@@ -71,6 +71,8 @@ class Account:
         """CSRF токен."""
         self.phpsessid: str | None = None
         """PHPSESSID сессии."""
+        self.cookies: dict[str, str] = {}
+        """Дополнительные куки, полученные от FunPay (например, golden_seal), для переотправки в последующих запросах."""
         self.last_update: int | None = None
         """Последнее время обновления аккаунта."""
 
@@ -134,10 +136,12 @@ class Account:
         """
         headers["cookie"] = f"golden_key={self.golden_key}"
         headers["cookie"] += f"; PHPSESSID={self.phpsessid}" if self.phpsessid and not exclude_phpsessid else ""
+        for cookie_name, cookie_value in self.cookies.items():
+            headers["cookie"] += f"; {cookie_name}={cookie_value}"
         if self.user_agent:
             headers["user-agent"] = self.user_agent
         link = api_method if api_method.startswith("https://funpay.com") else "https://funpay.com/" + api_method
-        
+
         while True:
             response = self.session.request(
                 method=request_method,
@@ -147,16 +151,34 @@ class Account:
                 timeout=self.requests_timeout,
                 proxies=self.proxy or {}
             )
+            self.__update_cookies(response)
             if response.status_code == 429:
                 time.sleep(0.4)
                 continue
             break
-            
+
         if response.status_code == 403:
             raise exceptions.UnauthorizedError(response)
         elif response.status_code != 200 and raise_not_200:
             raise exceptions.RequestFailedError(response)
         return response
+
+    def __update_cookies(self, response: requests.Response) -> None:
+        """
+        Сохраняет новые куки из ответа FunPay для переотправки в последующих запросах.
+
+        Необходимо, в частности, для куки ``golden_seal``, которую FunPay начал требовать для
+        авторизации. ``PHPSESSID`` и ``fav_games`` пропускаются, т.к. ``PHPSESSID`` управляется
+        отдельно (см. :py:obj:`.Account.phpsessid`), а ``fav_games`` не нужна для работы.
+
+        :param response: объект ответа.
+        :type response: :class:`requests.Response`
+        """
+        cookies = response.cookies.get_dict()
+        for cookie_name, cookie_value in cookies.items():
+            if cookie_name in ("PHPSESSID", "fav_games"):
+                continue
+            self.cookies[cookie_name] = cookie_value
 
     def get(self, update_phpsessid: bool = False) -> Account:
         """
