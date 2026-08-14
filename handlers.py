@@ -5,13 +5,13 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from vertex import Vertex
 
 from FunPayAPI.types import OrderShortcut, Order
 from FunPayAPI import exceptions, utils as fp_utils
 from FunPayAPI.updater.events import *
-
 
 from tg_bot import utils, keyboards
 from Utils import vertex_tools
@@ -23,16 +23,12 @@ import logging
 import time
 import re
 
-
-
 LAST_STACK_ID = ""
 MSG_LOG_LAST_STACK_ID = ""
-
 
 logger = logging.getLogger("FPV.handlers")
 localizer = Localizer()
 _ = localizer.translate
-
 
 ORDER_HTML_TEMPLATE = """<a href="https://funpay.com/orders/DELITEST/" class="tc-item">
    <div class="tc-date" bis_skin_checked="1">
@@ -62,17 +58,22 @@ ORDER_HTML_TEMPLATE = """<a href="https://funpay.com/orders/DELITEST/" class="tc
 </a>"""
 
 
-AMOUNT_EXPRESSION = re.compile(r'\d+ шт\.')
-
-
 # INIT MESSAGE
 def save_init_chats_handler(c: Vertex, e: InitialChatEvent):
     """
     Кэширует существующие чаты (чтобы не отправлять приветственные сообщения).
     """
-    if c.MAIN_CFG["Greetings"].getboolean("cacheInitChats") and e.chat.id not in c.old_users:
-        c.old_users.append(e.chat.id)
+    if c.MAIN_CFG["Greetings"].getboolean("sendGreetings") and e.chat.id not in c.old_users:
+        c.old_users[e.chat.id] = int(time.time())
         vertex_tools.cache_old_users(c.old_users)
+
+
+def update_threshold_on_initial_chat(c: Vertex, e: InitialChatEvent):
+    """
+    Обновляет пороговое значение для определения новых чатов.
+    """
+    if e.chat.id > c.greeting_chat_id_threshold:
+        c.greeting_chat_id_threshold = e.chat.id
 
 
 # NEW MESSAGE / LAST CHAT MESSAGE CHANGED
@@ -113,6 +114,25 @@ def log_msg_handler(c: Vertex, e: NewMessageEvent):
     MSG_LOG_LAST_STACK_ID = e.stack.id()
 
 
+def update_threshold_on_last_message_change(c: Vertex, e: LastChatMessageChangedEvent | NewMessageEvent):
+    """
+    Обновляет пороговое значение для определения новых чатов.
+    """
+    # Должно выполняться после greetings_handler для корректной обработки
+    # c.greeting_threshold_chat_ids (чтобы не спамило приветствиями)
+    if not c.old_mode_enabled:
+        if isinstance(e, LastChatMessageChangedEvent):
+            return
+        chat_id = e.message.chat_id
+    else:
+        chat_id = e.chat.id
+    if e.runner_tag != c.last_greeting_chat_id_threshold_change_tag:
+        c.greeting_chat_id_threshold = max([c.greeting_chat_id_threshold, *c.greeting_threshold_chat_ids])
+        c.greeting_threshold_chat_ids = set()
+        c.last_greeting_chat_id_threshold_change_tag = e.runner_tag
+    c.greeting_threshold_chat_ids.add(chat_id)
+
+
 def greetings_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChangedEvent):
     """
     Отправляет приветственное сообщение.
@@ -123,12 +143,16 @@ def greetings_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChangedEven
         if isinstance(e, LastChatMessageChangedEvent):
             return
         obj = e.message
-        chat_id, chat_name, mtype, its_me = obj.chat_id, obj.chat_name, obj.type, obj.author_id == c.account.id
+        chat_id, chat_name, mtype, its_me, badge = obj.chat_id, obj.chat_name, obj.type, obj.author_id == c.account.id, obj.badge
     else:
         obj = e.chat
-        chat_id, chat_name, mtype, its_me = obj.id, obj.name, obj.last_message_type, not obj.unread
+        chat_id, chat_name, mtype, its_me, badge = obj.id, obj.name, obj.last_message_type, not obj.unread, None
+    is_old_chat = (chat_id <= c.greeting_chat_id_threshold or chat_id in c.greeting_threshold_chat_ids)
 
-    if any([chat_id in c.old_users, its_me,
+    if any([c.MAIN_CFG["Greetings"].getboolean("onlyNewChats") and is_old_chat,
+            time.time() - c.old_users.get(chat_id, 0) < float(
+                c.MAIN_CFG["Greetings"]["greetingsCooldown"]) * 24 * 60 * 60,
+            its_me, mtype in (MessageTypes.DEAR_VENDORS, MessageTypes.ORDER_CONFIRMED_BY_ADMIN), badge is not None,
             (mtype is not MessageTypes.NON_SYSTEM and c.MAIN_CFG["Greetings"].getboolean("ignoreSystemMessages"))]):
         return
 
@@ -141,16 +165,20 @@ def add_old_user_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChangedE
     """
     Добавляет пользователя в список написавших.
     """
+    if not c.MAIN_CFG["Greetings"].getboolean("sendGreetings") or c.MAIN_CFG["Greetings"].getboolean("onlyNewChats"):
+        return
+
     if not c.old_mode_enabled:
         if isinstance(e, LastChatMessageChangedEvent):
             return
-        chat_id = e.message.chat_id
+        chat_id, mtype = e.message.chat_id, e.message.type
     else:
-        chat_id = e.chat.id
+        chat_id, mtype = e.chat.id, e.chat.last_message_type
 
-    if chat_id in c.old_users:
+    if mtype == MessageTypes.DEAR_VENDORS:
         return
-    c.old_users.append(chat_id)
+
+    c.old_users[chat_id] = int(time.time())
     vertex_tools.cache_old_users(c.old_users)
 
 
@@ -169,7 +197,10 @@ def send_response_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChanged
         obj, mtext = e.chat, str(e.chat)
         chat_id, chat_name, username = obj.id, obj.name, obj.name
 
+    mtext = mtext.replace("\n", "")
     if any([c.bl_response_enabled and username in c.blacklist, (command := mtext.strip().lower()) not in c.AR_CFG]):
+        return
+    if not c.AR_CFG[command].getboolean("enabled"):
         return
 
     logger.info(_("log_new_cmd", command, chat_name, chat_id))
@@ -178,12 +209,19 @@ def send_response_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChanged
 
 
 def old_send_new_msg_notification_handler(c: Vertex, e: LastChatMessageChangedEvent):
-    if any([not c.old_mode_enabled, not c.telegram, not e.chat.unread, c.bl_msg_notification_enabled and e.chat.name in c.blacklist,
+    if any([not c.old_mode_enabled, not c.telegram, not e.chat.unread,
+            c.bl_msg_notification_enabled and e.chat.name in c.blacklist,
             e.chat.last_message_type is not MessageTypes.NON_SYSTEM, str(e.chat).strip().lower() in c.AR_CFG.sections(),
             str(e.chat).startswith("!автовыдача")]):
         return
-
-    text = f"<i><b>👤 {e.chat.name}: </b></i><code>{str(e.chat)}</code>"
+    user = e.chat.name
+    if user in c.blacklist:
+        user = f"🚷 {user}"
+    elif e.chat.last_by_bot:
+        user = f"🐦 {user}"
+    else:
+        user = f"👤 {user}"
+    text = f"<i><b>{user}: </b></i><code>{utils.escape(str(e.chat))}</code>"
     kb = keyboards.reply(e.chat.id, e.chat.name, extend=True)
     Thread(target=c.telegram.send_notification, args=(text, kb, utils.NotificationTypes.new_message),
            daemon=True).start()
@@ -230,30 +268,45 @@ def send_new_msg_notification_handler(c: Vertex, e: NewMessageEvent) -> None:
     text = ""
     last_message_author_id = -1
     last_by_bot = False
+    last_badge = None
+    last_by_vertex = False
     for i in events:
         message_text = str(e.message)
         if message_text.strip().lower() in c.AR_CFG.sections() and len(events) < 2:
-            continue
+            return
         elif message_text.startswith("!автовыдача") and len(events) < 2:
-            continue
-
-        if i.message.author_id == last_message_author_id and i.message.by_bot == last_by_bot:
+            return
+        if i.message.author_id == last_message_author_id and i.message.by_bot == last_by_bot and \
+                i.message.badge == last_badge and i.message.by_vertex == last_by_vertex:
             author = ""
         elif i.message.author_id == c.account.id:
             author = f"<i><b>🤖 {_('you')} (<i>FPV</i>):</b></i> " if i.message.by_bot else f"<i><b>🫵 {_('you')}:</b></i> "
+            if i.message.is_autoreply:
+                author = f"<i><b>📦 {_('you')} ({i.message.badge}):</b></i> "
         elif i.message.author_id == 0:
             author = f"<i><b>🔵 {i.message.author}: </b></i>"
-        elif i.message.badge:
-            author = f"<i><b>🆘 {i.message.author} ({_('support')}): </b></i>"
+        elif i.message.is_employee:
+            author = f"<i><b>🆘 {i.message.author} ({i.message.badge}): </b></i>"
         elif i.message.author == i.message.chat_name:
             author = f"<i><b>👤 {i.message.author}: </b></i>"
+            if i.message.is_autoreply:
+                author = f"<i><b>🛍️ {i.message.author} ({i.message.badge}):</b></i> "
+            elif i.message.author in c.blacklist:
+                author = f"<i><b>🚷 {i.message.author}: </b></i>"
+            elif i.message.by_bot:
+                author = f"<i><b>🐦 {i.message.author}: </b></i>"
+            elif i.message.by_vertex:
+                author = f"<i><b>🐺 {i.message.author}: </b></i>"
         else:
             author = f"<i><b>🆘 {i.message.author} {_('support')}: </b></i>"
-        msg_text = f"<code>{i.message}</code>" if i.message.text else f"<a href=\"{i.message}\">{_('photo')}</a>"
+        msg_text = f"<code>{utils.escape(i.message.text)}</code>" if i.message.text else \
+            f"<a href=\"{i.message.image_link}\">" \
+            f"{c.show_image_name and not (i.message.author_id == c.account.id and i.message.by_bot) and i.message.image_name or _('photo')}</a>"
         text += f"{author}{msg_text}\n\n"
         last_message_author_id = i.message.author_id
         last_by_bot = i.message.by_bot
-
+        last_by_vertex = i.message.by_vertex
+        last_badge = i.message.badge
     kb = keyboards.reply(chat_id, chat_name, extend=True)
     Thread(target=c.telegram.send_notification, args=(text, kb, utils.NotificationTypes.new_message),
            daemon=True).start()
@@ -262,10 +315,10 @@ def send_new_msg_notification_handler(c: Vertex, e: NewMessageEvent) -> None:
 def send_review_notification(c: Vertex, order: Order, chat_id: int, reply_text: str | None):
     if not c.telegram:
         return
-    reply_text = f"\n\n🗨️<b>Ответ:</b> \n<code>{utils.escape(reply_text)}</code>" if reply_text else ""
+    reply_text = _("ntfc_review_reply_text").format(utils.escape(reply_text)) if reply_text else ""
     Thread(target=c.telegram.send_notification,
-           args=(f"🔮 Вы получили {'⭐' * order.review.stars} за заказ <code>{order.id}</code>!\n\n"
-                 f"💬<b>Отзыв:</b>\n<code>{utils.escape(order.review.text)}</code>{reply_text}",
+           args=(_("ntfc_new_review").format('⭐' * order.review.stars, order.id, utils.escape(order.review.text),
+                                             reply_text),
                  keyboards.new_order(order.id, order.buyer_username, chat_id),
                  utils.NotificationTypes.review),
            daemon=True).start()
@@ -275,44 +328,67 @@ def process_review_handler(c: Vertex, e: NewMessageEvent | LastChatMessageChange
     if not c.old_mode_enabled:
         if isinstance(e, LastChatMessageChangedEvent):
             return
-        message_type, its_me = e.message.type, c.account.username in str(e.message)
-        message_text, chat_id = str(e.message), e.message.chat_id
+        obj = e.message
+        message_type, its_me = obj.type, obj.i_am_buyer
+        message_text, chat_id = str(obj), obj.chat_id
+
     else:
-        message_type, its_me = e.chat.last_message_type, c.account.username in str(e.chat)
-        message_text, chat_id = str(e.chat), e.chat.id
+        obj = e.chat
+        message_type, its_me = obj.last_message_type, f" {c.account.username} " in str(obj)
+        message_text, chat_id = str(obj), obj.id
 
     if message_type not in [types.MessageTypes.NEW_FEEDBACK, types.MessageTypes.FEEDBACK_CHANGED] or its_me:
         return
 
     def send_reply():
-        res = fp_utils.RegularExpressions()
-        order_id = res.ORDER_ID.findall(message_text)
-        if not order_id:
-            return
-        order_id = order_id[0][1:]
         try:
-            order = c.account.get_order(order_id)
+            order = c.get_order_from_object(obj)
+            if order is None:
+                raise Exception("Не удалось получить объект заказа.")  # locale
         except:
-            logger.error(f"Не удалось получить информацию о заказе #{order_id}.")
+            logger.error(f"Не удалось получить информацию о заказе для сообщения: \"{message_text}\".")  # locale
             logger.debug("TRACEBACK", exc_info=True)
             return
 
         if not order.review or not order.review.stars:
             return
 
-        logger.info(f"Изменен отзыв на заказ #{order.id}.")
+        logger.info(f"Изменен отзыв на заказ #{order.id}.")  # locale
 
         toggle = f"star{order.review.stars}Reply"
         text = f"star{order.review.stars}ReplyText"
         reply_text = None
         if c.MAIN_CFG["ReviewReply"].getboolean(toggle) and c.MAIN_CFG["ReviewReply"].get(text):
             try:
+                # Укорачиваем текст до 999 символов (оставляем 1 на спецсимвол), до 10 строк
+                def format_text4review(text_: str):
+                    max_l = 999
+                    text_ = text_[:max_l + 1]
+                    if len(text_) > max_l:
+                        ln = len(text_)
+                        indexes = []
+                        for char in (".", "!", "\n"):
+                            index1 = text_.rfind(char)
+                            indexes.extend([index1, text_[:index1].rfind(char)])
+                        text_ = text_[:max(indexes, key=lambda x: (x < ln - 1, x))] + "🐦"
+                    text_ = text_.strip()
+                    while text_.count("\n") > 9 and text.count("\n\n") > 1:
+                        # заменяем с конца все двойные переносы строк на одинарные, но оставляем как можно больше
+                        # переносов строк и не менее одного двойного переноса
+                        text_ = text_[::-1].replace("\n\n", "\n",
+                                                    min([text_.count("\n\n") - 1, text_.count("\n") - 9]))[::-1]
+                    if text_.count("\n") > 9:
+                        text_ = text_[::-1].replace("\n", " ", text_.count("\n") - 9)[::-1]
+                    return text_
+
                 reply_text = vertex_tools.format_order_text(c.MAIN_CFG["ReviewReply"].get(text), order)
-                c.account.send_review(order_id, reply_text)
+                reply_text = format_text4review(reply_text)
+                c.account.send_review(order.id, reply_text)
             except:
-                logger.error(f"Произошла ошибка при ответе на отзыв {order_id}.")
+                logger.error(f"Произошла ошибка при ответе на отзыв {order.id}.")  # locale
                 logger.debug("TRACEBACK", exc_info=True)
         send_review_notification(c, order, chat_id, reply_text)
+
     Thread(target=send_reply, daemon=True).start()
 
 
@@ -334,11 +410,12 @@ def send_command_notification_handler(c: Vertex, e: NewMessageEvent | LastChatMe
     if c.bl_cmd_notification_enabled and username in c.blacklist:
         return
     command = message_text.strip().lower()
-    if command not in c.AR_CFG or not c.AR_CFG[command].getboolean("telegramNotification"):
+    if (command not in c.AR_CFG or not c.AR_CFG[command].getboolean("telegramNotification")
+            or not c.AR_CFG[command].getboolean("enabled")):
         return
 
     if not c.AR_CFG[command].get("notificationText"):
-        text = f"🧑‍💻 Пользователь <b><i>{username}</i></b> ввел команду <code>{utils.escape(command)}</code>."
+        text = f"🧑‍💻 Пользователь <b><i>{username}</i></b> ввел команду <code>{utils.escape(command)}</code>."  # locale
     else:
         text = vertex_tools.format_msg_text(c.AR_CFG[command]["notificationText"], obj)
 
@@ -353,46 +430,48 @@ def test_auto_delivery_handler(c: Vertex, e: NewMessageEvent | LastChatMessageCh
     if not c.old_mode_enabled:
         if isinstance(e, LastChatMessageChangedEvent):
             return
-        obj, message_text, chat_name = e.message, str(e.message), e.message.chat_name
+        obj, message_text, chat_name, chat_id = e.message, str(e.message), e.message.chat_name, e.message.chat_id
     else:
-        obj, message_text, chat_name = e.chat, str(e.chat), e.chat.name
+        obj, message_text, chat_name, chat_id = e.chat, str(e.chat), e.chat.name, e.chat.id
 
     if not message_text.startswith("!автовыдача"):
         return
 
     split = message_text.split()
     if len(split) < 2:
-        logger.warning("Одноразовый ключ автовыдачи не обнаружен.")
+        logger.warning("Одноразовый ключ автовыдачи не обнаружен.")  # locale
         return
 
     key = split[1].strip()
     if key not in c.delivery_tests:
-        logger.warning("Невалидный одноразовый ключ автовыдачи.")
+        logger.warning("Невалидный одноразовый ключ автовыдачи.")  # locale
         return
 
     lot_name = c.delivery_tests[key]
     del c.delivery_tests[key]
     date = datetime.now()
     date_text = date.strftime("%H:%M")
-    html = ORDER_HTML_TEMPLATE.replace("$username", chat_name).replace("$lot_name", lot_name).replace("$date", date_text)
+    html = ORDER_HTML_TEMPLATE.replace("$username", chat_name).replace("$lot_name", lot_name).replace("$date",
+                                                                                                      date_text)
 
-    fake_order = OrderShortcut("ADTEST", lot_name, 0.0, chat_name, 000000, types.OrderStatuses.PAID,
-                               date, "Авто-выдача, Тест", html)
+    fake_order = OrderShortcut("ADTEST", lot_name, 0.0, Currency.UNKNOWN, chat_name, 000000, chat_id,
+                               types.OrderStatuses.PAID,
+                               date, "Авто-выдача, Тест", None, html)
 
     fake_event = NewOrderEvent(e.runner_tag, fake_order)
     c.run_handlers(c.new_order_handlers, (c, fake_event,))
 
 
-def send_categories_raised_notification_handler(c: Vertex, cat: types.Category) -> None:
+def send_categories_raised_notification_handler(c: Vertex, cat: types.Category, error_text: str = "") -> None:
     """
     Отправляет уведомление о поднятии лотов в Telegram.
     """
     if not c.telegram:
         return
 
-    text = f"""⤴️<b><i>Поднял все лоты категории</i></b> <code>{cat.name}</code>"""
+    text = f"""⤴️<b><i>Поднял все лоты категории</i></b> <code>{cat.name}</code>\n<tg-spoiler>{error_text}</tg-spoiler>"""  # locale
     Thread(target=c.telegram.send_notification,
-           args=(text, ),
+           args=(text,),
            kwargs={"notification_type": utils.NotificationTypes.lots_raise}, daemon=True).start()
 
 
@@ -419,24 +498,6 @@ def check_products_amount(config_obj: configparser.SectionProxy) -> int:
     return vertex_tools.count_products(f"storage/products/{file_name}")
 
 
-def update_current_lots_handler(c: Vertex, e: OrdersListChangedEvent):
-    logger.info("Получаю информацию о лотах...")
-    attempts = 3
-    while attempts:
-        try:
-            c.curr_profile = c.account.get_user(c.account.id)
-            c.curr_profile_last_tag = e.runner_tag
-            break
-        except:
-            logger.error("Произошла ошибка при получении информации о лотах.")
-            logger.debug("TRACEBACK", exc_info=True)
-            attempts -= 1
-            time.sleep(2)
-    else:
-        logger.error("Не удалось получить информацию о лотах: превышено кол-во попыток.")
-        return
-
-
 # Новый ордер (REGISTER_TO_NEW_ORDER)
 def log_new_order_handler(c: Vertex, e: NewOrderEvent, *args):
     """
@@ -448,15 +509,46 @@ def log_new_order_handler(c: Vertex, e: NewOrderEvent, *args):
 def setup_event_attributes_handler(c: Vertex, e: NewOrderEvent, *args):
     config_section_name = None
     config_section_obj = None
-    for lot_name in c.AD_CFG:
-        if lot_name in e.order.description:
+    lot_shortcut = None
+    lot_id = None
+    lot_description = e.order.description
+    # пробуем найти лот, чтобы не выдавать по строке, которую вписал покупатель при оформлении заказа
+    for lot in sorted(list(c.profile.get_sorted_lots(2).get(e.order.subcategory, {}).values()),
+                      key=lambda l: len(f"{l.server}, {l.side}, {l.description}"), reverse=True):
+
+        temp_desc = ", ".join([i for i in [lot.server, lot.side, lot.description] if i])
+
+        if temp_desc in e.order.description:
+            lot_description = temp_desc
+            lot_shortcut = lot
+            lot_id = lot.id
+            break
+
+    for i in range(3):
+        # Собираем ВСЕ подходящие секции этого pass'а и берём самую длинную (специфичную), а не
+        # первую по порядку в файле - иначе более общее название лота, добавленное в конфиг раньше,
+        # могло бы перехватить заказ, который на самом деле соответствует более узкому названию.
+        matched_lot_names = []
+        for lot_name in c.AD_CFG:
+            if i == 0:
+                rule = lot_description == lot_name
+            elif i == 1:
+                rule = lot_description.startswith(lot_name)
+            else:
+                rule = lot_name in lot_description
+
+            if rule:
+                matched_lot_names.append(lot_name)
+
+        if matched_lot_names:
+            lot_name = max(matched_lot_names, key=len)
             config_section_obj = c.AD_CFG[lot_name]
             config_section_name = lot_name
             break
 
     attributes = {"config_section_name": config_section_name, "config_section_obj": config_section_obj,
                   "delivered": False, "delivery_text": None, "goods_delivered": 0, "goods_left": None,
-                  "error": 0, "error_text": None}
+                  "error": 0, "error_text": None, "lot_id": lot_id, "lot_shortcut": lot_shortcut}
     for i in attributes:
         setattr(e, i, attributes[i])
 
@@ -485,17 +577,25 @@ def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
             delivery_info = _("ntfc_new_order_user_blocked")
         else:
             delivery_info = _("ntfc_new_order_will_be_delivered")
-    text = _("ntfc_new_order", utils.escape(e.order.description), e.order.buyer_username, e.order.price, e.order.id,
-             delivery_info)
+    text = _("ntfc_new_order", f"{utils.escape(e.order.description)}, {utils.escape(e.order.subcategory_name)}",
+             e.order.buyer_username, f"{e.order.price} {e.order.currency}", e.order.id, delivery_info)
 
-    chat_id = c.account.get_chat_by_name(e.order.buyer_username, True).id
+    chat = c.account.get_chat_by_name(e.order.buyer_username)
+    if chat:
+        chat_id = chat.id
+    else:
+        chat_id = e.order.chat_id
     keyboard = keyboards.new_order(e.order.id, e.order.buyer_username, chat_id)
     Thread(target=c.telegram.send_notification, args=(text, keyboard, utils.NotificationTypes.new_order),
            daemon=True).start()
 
 
 def deliver_goods(c: Vertex, e: NewOrderEvent, *args):
-    chat_id = c.account.get_chat_by_name(e.order.buyer_username).id
+    chat = c.account.get_chat_by_name(e.order.buyer_username)
+    if chat:
+        chat_id = chat.id
+    else:
+        chat_id = e.order.chat_id
     cfg_obj = getattr(e, "config_section_obj")
     delivery_text = vertex_tools.format_order_text(cfg_obj["response"], e.order)
 
@@ -503,26 +603,27 @@ def deliver_goods(c: Vertex, e: NewOrderEvent, *args):
     try:
         if file_name := cfg_obj.get("productsFileName"):
             if c.multidelivery_enabled and not cfg_obj.getboolean("disableMultiDelivery"):
-                amount_re = AMOUNT_EXPRESSION.findall(e.order.description)
-                amount = int(amount_re[0].split(" ")[0]) if amount_re else 1
+                amount = e.order.amount if e.order.amount else 1
             products, goods_left = vertex_tools.get_products(f"storage/products/{file_name}", amount)
             delivery_text = delivery_text.replace("$product", "\n".join(products).replace("\\n", "\n"))
     except Exception as exc:
-        logger.error(f"Произошла ошибка при получении товаров для заказа $YELLOW{e.order.id}: {str(exc)}$RESET")
+        logger.error(
+            f"Произошла ошибка при получении товаров для заказа $YELLOW{e.order.id}: {str(exc)}$RESET")  # locale
         logger.debug("TRACEBACK", exc)
         setattr(e, "error", 1)
-        setattr(e, "error_text", f"Произошла ошибка при получении товаров для заказа {e.order.id}: {str(exc)}")
+        setattr(e, "error_text",
+                f"Произошла ошибка при получении товаров для заказа {e.order.id}: {str(exc)}")  # locale
         return
 
     result = c.send_message(chat_id, delivery_text, e.order.buyer_username)
     if not result:
-        logger.error(f"Не удалось отправить товар для ордера $YELLOW{e.order.id}$RESET.")
+        logger.error(f"Не удалось отправить товар для ордера $YELLOW{e.order.id}$RESET.")  # locale
         setattr(e, "error", 1)
-        setattr(e, "error_text", f"Не удалось отправить сообщение с товаром для заказа {e.order.id}.")
+        setattr(e, "error_text", f"Не удалось отправить сообщение с товаром для заказа {e.order.id}.")  # locale
         if file_name and products:
             vertex_tools.add_products(f"storage/products/{file_name}", products, at_zero_position=True)
     else:
-        logger.info(f"Товар для заказа {e.order.id} выдан.")
+        logger.info(f"Товар для заказа {e.order.id} выдан.")  # locale
         setattr(e, "delivered", True)
         setattr(e, "delivery_text", delivery_text)
         setattr(e, "goods_delivered", amount)
@@ -535,15 +636,15 @@ def deliver_product_handler(c: Vertex, e: NewOrderEvent, *args) -> None:
     """
     if not c.MAIN_CFG["FunPay"].getboolean("autoDelivery"):
         return
-    if e.order.buyer_username in c.blacklist and c.MAIN_CFG["BlockList"].getboolean("blockDelivery"):
+    if e.order.buyer_username in c.blacklist and c.bl_delivery_enabled:
         logger.info(f"Пользователь {e.order.buyer_username} находится в ЧС и включена блокировка автовыдачи. "
-                    f"$YELLOW(ID: {e.order.id})$RESET")
+                    f"$YELLOW(ID: {e.order.id})$RESET")  # locale
         return
 
     if (config_section_obj := getattr(e, "config_section_obj")) is None:
         return
     if config_section_obj.getboolean("disable"):
-        logger.info(f"Для лота \"{e.order.description}\" отключена автовыдача.")
+        logger.info(f"Для лота \"{e.order.description}\" отключена автовыдача.")  # locale
         return
 
     c.run_handlers(c.pre_delivery_handlers, (c, e))
@@ -566,17 +667,44 @@ def send_delivery_notification_handler(c: Vertex, e: NewOrderEvent):
         text = f"""✅ Успешно выдал товар для ордера <code>{e.order.id}</code>.\n
 🛒 <b><i>Товар:</i></b>
 <code>{utils.escape(getattr(e, "delivery_text"))}</code>\n
-📋 <b><i>Осталось товаров: </i></b>{amount}"""
+📋 <b><i>Осталось товаров: </i></b>{amount}"""  # locale
 
     Thread(target=c.telegram.send_notification, args=(text,),
            kwargs={"notification_type": utils.NotificationTypes.delivery}, daemon=True).start()
 
+def update_current_lots(c: Vertex, e: NewOrderEvent):
+    logger.info("Получаю информацию о лотах...")  # locale
+    attempts = 3
+    while attempts:
+        try:
+            c.curr_profile = c.account.get_user(c.account.id)
+            c.curr_profile_last_tag = e.runner_tag
+            break
+        except:
+            logger.error("Произошла ошибка при получении информации о лотах.")  # locale
+            logger.debug("TRACEBACK", exc_info=True)
+            attempts -= 1
+            time.sleep(2)
+    else:
+        logger.error("Не удалось получить информацию о лотах: превышено кол-во попыток.")  # locale
+        return
+
+
+def update_profile_lots(c: Vertex, e: NewOrderEvent):
+    """Обновляет лоты в c.profile"""
+    if c.curr_profile_last_tag != e.runner_tag or c.profile_last_tag == e.runner_tag:
+        return
+    c.profile_last_tag = e.runner_tag
+    lots = c.curr_profile.get_sorted_lots(1)
+
+    for lot_id, lot in lots.items():
+        c.profile.update_lot(lot)
 
 def update_lot_state(vertex: Vertex, lot: types.LotShortcut, task: int) -> bool:
     """
     Обновляет состояние лота
 
-    :param vertex: объект вертекса.
+    :param vertex: объект Вертекса.
     :param lot: объект лота.
     :param task: -1 - деактивировать лот. 1 - активировать лот.
 
@@ -586,39 +714,46 @@ def update_lot_state(vertex: Vertex, lot: types.LotShortcut, task: int) -> bool:
     while attempts:
         try:
             lot_fields = vertex.account.get_lot_fields(lot.id)
-            if task == 1:
+            if task == (1 if lot_fields.active else -1):
+                # если лот и так в нужном состоянии
+                return True
+            elif task == 1:
                 lot_fields.active = True
                 vertex.account.save_lot(lot_fields)
-                logger.info(f"Восстановил лот $YELLOW{lot.description}$RESET.")
+                logger.info(f"Восстановил лот $YELLOW{lot.id} - {lot.description}$RESET.")  # locale
             elif task == -1:
                 lot_fields.active = False
                 vertex.account.save_lot(lot_fields)
-                logger.info(f"Деактивировал лот $YELLOW{lot.description}$RESET.")
+                logger.info(f"Деактивировал лот $YELLOW{lot.id} - {lot.description}$RESET.")  # locale
             return True
         except Exception as e:
-            if isinstance(e, exceptions.RequestFailedError) and e.status_code == 404:
-                logger.error(f"Произошла ошибка при изменении состояния лота $YELLOW{lot.description}$RESET:"
+            if isinstance(e, exceptions.LotParsingError):
+                logger.error(f"Произошла ошибка при изменении состояния лота $YELLOW{lot.description}$RESET:"  # locale
                              "лот не найден.")
                 return False
-            logger.error(f"Произошла ошибка при изменении состояния лота $YELLOW{lot.description}$RESET.")
+            logger.error(f"Произошла ошибка при изменении состояния лота $YELLOW{lot.description}$RESET.")  # locale
             logger.debug("TRACEBACK", exc_info=True)
             attempts -= 1
             time.sleep(2)
-    logger.error(f"Не удалось изменить состояние лота $YELLOW{lot.description}$RESET: превышено кол-во попыток.")
+    logger.error(
+        f"Не удалось изменить состояние лота $YELLOW{lot.description}$RESET: превышено кол-во попыток.")  # locale
     return False
 
 
 def update_lots_states(vertex: Vertex, event: NewOrderEvent):
     if not any([vertex.autorestore_enabled, vertex.autodisable_enabled]):
         return
-    if vertex.curr_profile_last_tag != event.runner_tag or vertex.last_state_change_tag == event.runner_tag:
+    curr_profile_tag = vertex.curr_profile_last_tag
+    if vertex.last_state_change_tag == curr_profile_tag:
         return
-
+    vertex.last_state_change_tag = curr_profile_tag
     lots = vertex.curr_profile.get_sorted_lots(1)
 
     deactivated = []
     restored = []
-    for lot in vertex.profile.get_lots():
+    for lot in vertex.profile.get_sorted_lots(3)[SubCategoryTypes.COMMON].values():
+        if not lot.description:
+            continue
         # -1 - деактивировать
         # 0 - ничего не делать
         # 1 - восстановить
@@ -665,40 +800,55 @@ def update_lots_states(vertex: Vertex, event: NewOrderEvent):
             time.sleep(0.5)
 
     if deactivated:
-        lots = "\n".join(deactivated)
+        lots = "\n".join(deactivated)  # locale
         text = f"""🔴 <b>Деактивировал лоты:</b>
         
 <code>{lots}</code>"""
-        Thread(target=vertex.telegram.send_notification, args=(text, ),
+        Thread(target=vertex.telegram.send_notification, args=(text,),
                kwargs={"notification_type": utils.NotificationTypes.lots_deactivate}, daemon=True).start()
     if restored:
-        lots = "\n".join(restored)
+        lots = "\n".join(restored)  # locale
         text = f"""🟢 <b>Активировал лоты:</b>
 
 <code>{lots}</code>"""
         Thread(target=vertex.telegram.send_notification, args=(text,),
                kwargs={"notification_type": utils.NotificationTypes.lots_restore}, daemon=True).start()
-    vertex.last_state_change_tag = event.runner_tag
 
 
-def update_lots_state_handler(vertex: Vertex, event: NewOrderEvent, *args):
-    Thread(target=update_lots_states, args=(vertex, event), daemon=True).start()
+def update_profiles_handler(vertex: Vertex, event: NewOrderEvent | OrdersListChangedEvent, *args):
+    """Обновляет информацию о профилях и состояния лотов в отдельном потоке."""
+    def f(c: Vertex, e: NewOrderEvent):
+        try:
+            update_current_lots(c, e)
+            update_profile_lots(c, e)
+            update_lots_states(c, e)
+        except:
+            logger.warning("Произошла ошибка при обновлении информации о профилях и состояний лотов.")
+            logger.debug("TRACEBACK", exc_info=True)
 
+    if event.runner_tag != vertex.last_profile_refresh_event_tag:
+        vertex.last_profile_refresh_event_tag = event.runner_tag
+        Thread(target=f, args=(vertex, event), daemon=True).start()
 
 # BIND_TO_ORDER_STATUS_CHANGED
-def send_thank_u_message_handler(c: Vertex, e: OrderStatusChangedEvent):
+def send_thank_u_message_handler(vertex: Vertex, event: OrderStatusChangedEvent):
     """
     Отправляет ответное сообщение на подтверждение заказа.
     """
-    if not c.MAIN_CFG["OrderConfirm"].getboolean("sendReply") or e.order.status is not types.OrderStatuses.CLOSED:
+    if not vertex.MAIN_CFG["OrderConfirm"].getboolean("sendReply") or event.order.status is not types.OrderStatuses.CLOSED:
         return
 
-    text = vertex_tools.format_order_text(c.MAIN_CFG["OrderConfirm"]["replyText"], e.order)
-    chat = c.account.get_chat_by_name(e.order.buyer_username, True)
-    logger.info(f"Пользователь $YELLOW{e.order.buyer_username}$RESET подтвердил выполнение заказа "
-                f"$YELLOW{e.order.id}.$RESET")
-    logger.info(f"Отправляю ответное сообщение ...")
-    Thread(target=c.send_message, args=(chat.id, text, e.order.buyer_username), daemon=True).start()
+    text = vertex_tools.format_order_text(vertex.MAIN_CFG["OrderConfirm"]["replyText"], event.order)
+    chat = vertex.account.get_chat_by_name(event.order.buyer_username)
+    if chat:
+        chat_id = chat.id
+    else:
+        chat_id = event.order.chat_id
+    logger.info(f"Пользователь $YELLOW{event.order.buyer_username}$RESET подтвердил выполнение заказа "  # locale
+                f"$YELLOW{event.order.id}.$RESET")  # locale
+    logger.info(f"Отправляю ответное сообщение ...")  # locale
+    Thread(target=vertex.send_message, args=(chat_id, text, event.order.buyer_username),
+           kwargs={'watermark': vertex.MAIN_CFG["OrderConfirm"].getboolean("watermark")}, daemon=True).start()
 
 
 def send_order_confirmed_notification_handler(vertex: Vertex, event: OrderStatusChangedEvent):
@@ -708,12 +858,17 @@ def send_order_confirmed_notification_handler(vertex: Vertex, event: OrderStatus
     if not event.order.status == types.OrderStatuses.CLOSED:
         return
 
-    chat = vertex.account.get_chat_by_name(event.order.buyer_username, True)
-    Thread(target=vertex.telegram.send_notification,
-           args=(f"""🪙 Пользователь <a href="https://funpay.com/chat/?node={chat.id}">{event.order.buyer_username}</a> """
-                 f"""подтвердил выполнение заказа <code>{event.order.id}</code>.""",
-                 keyboards.new_order(event.order.id, event.order.buyer_username, chat.id),
-                 utils.NotificationTypes.order_confirmed),
+    chat = vertex.account.get_chat_by_name(event.order.buyer_username)
+    if chat:
+        chat_id = chat.id
+    else:
+        chat_id = event.order.chat_id
+    Thread(target=vertex.telegram.send_notification,  # locale
+           args=(
+               f"""🪙 Пользователь <a href="https://funpay.com/chat/?node={chat_id}">{event.order.buyer_username}</a> """
+               f"""подтвердил выполнение заказа <code>{event.order.id}</code>. (<code>{event.order.price} {event.order.currency}</code>)""",
+               keyboards.new_order(event.order.id, event.order.buyer_username, chat_id),
+               utils.NotificationTypes.order_confirmed),
            daemon=True).start()
 
 
@@ -732,38 +887,35 @@ def send_bot_started_notification_handler(c: Vertex, *args):
             continue
 
 
-
-
-
-
-BIND_TO_INIT_MESSAGE = [save_init_chats_handler]
+BIND_TO_INIT_MESSAGE = [save_init_chats_handler, update_threshold_on_initial_chat]
 
 BIND_TO_LAST_CHAT_MESSAGE_CHANGED = [old_log_msg_handler,
                                      greetings_handler,
+                                     update_threshold_on_last_message_change,
                                      add_old_user_handler,
                                      send_response_handler,
                                      process_review_handler,
                                      old_send_new_msg_notification_handler,
                                      send_command_notification_handler,
-                                     test_auto_delivery_handler,]
+                                     test_auto_delivery_handler]
 
 BIND_TO_NEW_MESSAGE = [log_msg_handler,
                        greetings_handler,
+                       update_threshold_on_last_message_change,
                        add_old_user_handler,
                        send_response_handler,
                        process_review_handler,
                        send_new_msg_notification_handler,
                        send_command_notification_handler,
-                       test_auto_delivery_handler,
-                       utils.message_hook]
+                       test_auto_delivery_handler]
 
 BIND_TO_POST_LOTS_RAISE = [send_categories_raised_notification_handler]
 
-BIND_TO_ORDERS_LIST_CHANGED = [update_current_lots_handler]
+# BIND_TO_ORDERS_LIST_CHANGED = [update_profiles_handler]
 
 BIND_TO_NEW_ORDER = [log_new_order_handler, setup_event_attributes_handler,
                      send_new_order_notification_handler, deliver_product_handler,
-                     update_lots_state_handler]
+                     update_profiles_handler]
 
 BIND_TO_ORDER_STATUS_CHANGED = [send_thank_u_message_handler, send_order_confirmed_notification_handler]
 

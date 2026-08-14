@@ -1,9 +1,15 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-COPY . C:\app
-WORKDIR C:\app
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-RUN python -m pip install --upgrade pip && \
-    python setup.py
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -U -r requirements.txt
+
+COPY . .
+
+VOLUME ["/app/configs", "/app/logs", "/app/storage", "/app/plugins"]
 
 CMD ["python", "main.py"]

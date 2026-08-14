@@ -1,5 +1,11 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+
+import bcrypt
+import requests
+
+from locales.localizer import Localizer
+
 if TYPE_CHECKING:
     from vertex import Vertex
 
@@ -8,15 +14,40 @@ import FunPayAPI.types
 from datetime import datetime
 import Utils.exceptions
 import itertools
+import threading
 import psutil
 import json
 import sys
 import os
 import re
-
+import time
+import logging
 
 PHOTO_RE = re.compile(r'\$photo=[\d]+')
 ENTITY_RE = re.compile(r"\$photo=\d+|\$new|(\$sleep=(\d+\.\d+|\d+))")
+logger = logging.getLogger("FPV.vertex_tools")
+localizer = Localizer()
+_ = localizer.translate
+
+_products_file_locks: dict[str, threading.Lock] = {}
+_products_file_locks_guard = threading.Lock()
+
+
+def get_products_file_lock(path: str) -> threading.Lock:
+    """
+    Возвращает Lock, общий для всех обращений к указанному товарному файлу (создаёт при первом
+    обращении). Используется всеми функциями, читающими/пишущими storage/products/*, чтобы
+    синхронизировать доступ из разных потоков.
+
+    :param path: путь до товарного файла.
+
+    :return: Lock, специфичный для данного файла.
+    """
+    normalized = os.path.normcase(os.path.abspath(path))
+    with _products_file_locks_guard:
+        if normalized not in _products_file_locks:
+            _products_file_locks[normalized] = threading.Lock()
+        return _products_file_locks[normalized]
 
 
 def count_products(path: str) -> int:
@@ -27,10 +58,11 @@ def count_products(path: str) -> int:
 
     :return: кол-во товара в указанном файле.
     """
-    if not os.path.exists(path):
-        return 0
-    with open(path, "r", encoding="utf-8") as f:
-        products = f.read()
+    with get_products_file_lock(path):
+        if not os.path.exists(path):
+            return 0
+        with open(path, "r", encoding="utf-8") as f:
+            products = f.read()
     products = products.split("\n")
     products = list(itertools.filterfalse(lambda el: not el, products))
     return len(products)
@@ -68,36 +100,164 @@ def load_blacklist() -> list[str]:
         return blacklist
 
 
-#def cache_disabled_plugins(disabled_plugins: list[str]) -> None:
-#    """
-#    Кэширует UUID отключенных плагинов.
-#
-#    :param disabled_plugins: список UUID отключенных плагинов.
-#    """
-#    if not os.path.exists("storage/cache"):
-#        os.makedirs("storage/cache")
-#
-#    with open("storage/cache/disabled_plugins.json", "w", encoding="utf-8") as f:
-#        f.write(json.dumps(disabled_plugins))
+def check_proxy(proxy: dict) -> bool:
+    """
+    Проверяет работоспособность прокси.
+
+    :param proxy: словарь с данными прокси.
+
+    :return: True, если прокси работает, иначе - False.
+    """
+    logger.info(_("crd_checking_proxy"))
+    try:
+        response = requests.get("https://api.ipify.org/", proxies=proxy, timeout=10)
+    except:
+        logger.error(_("crd_proxy_err"))
+        logger.debug("TRACEBACK", exc_info=True)
+        return False
+    logger.info(_("crd_proxy_success", response.content.decode()))
+    return True
 
 
-#def load_disabled_plugins() -> list[str]:
-#    """
-#    Загружает список UUID отключенных плагинов из кэша.
-#
-#    :return: список UUID отключенных плагинов.
-#    """
-#    if not os.path.exists("storage/cache/disabled_plugins.json"):
-#        return []
-#
-#    with open("storage/cache/disabled_plugins.json", "r", encoding="utf-8") as f:
-#        try:
-#            return json.loads(f.read())
-#        except json.decoder.JSONDecodeError:
-#            return []
+def validate_proxy(proxy: str):
+    """
+    Проверяет прокси на соответствие формату IPv4 и выбрасывает исключение или возвращает логин, пароль, IP и порт.
+
+    :param proxy: прокси
+    :return: логин, пароль, IP и порт
+    """
+    if "://" in proxy:
+        scheme, rest = proxy.split("://", 1)
+    else:
+        scheme = "http"
+        rest = proxy
+
+    if "@" in rest:
+        login_password, ip_port = rest.split("@")
+        login, password = login_password.split(":")
+    else:
+        login, password = "", ""
+        ip_port = rest
+
+    ip, port = ip_port.split(":")
+
+    ip_parts = ip.split(".")
+    if len(ip_parts) != 4 or not all(part.isdigit() and 0 <= int(part) < 256 for part in ip_parts):
+        raise ValueError("Неправильный IP")
+
+    if not port.isdigit() or not 0 < int(port) <= 65535:
+        raise ValueError("Неправильный порт")
+
+    if scheme not in ("http", "https", "socks5", "socks5h"):
+        raise ValueError("Схема прокси должна быть http, https, socks5 или socks5h")
+
+    return scheme, login, password, ip, port
+
+def build_proxy(scheme: str | None, login: str, password: str, ip: str, port: str) -> str:
+    if not scheme:
+        scheme = "http"
+    if login and password:
+        return f"{scheme}://{login}:{password}@{ip}:{port}"
+    else:
+        return f"{scheme}://{ip}:{port}"
 
 
-def cache_old_users(old_users: list[int]):
+def cache_proxy_dict(proxy_dict: dict[int, str]) -> None:
+    """
+    Кэширует список прокси.
+
+    :param proxy_dict: список прокси.
+    """
+    if not os.path.exists("storage/cache"):
+        os.makedirs("storage/cache")
+
+    with open("storage/cache/proxy_dict.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(proxy_dict, indent=4))
+
+
+def load_proxy_dict() -> dict[int, str]:
+    """
+    Загружает список прокси.
+
+    :return: список прокси.
+    """
+    if not os.path.exists("storage/cache/proxy_dict.json"):
+        return {}
+
+    with open("storage/cache/proxy_dict.json", "r", encoding="utf-8") as f:
+        proxy = f.read()
+
+        try:
+            proxy = json.loads(proxy)
+            proxy_dict = {}
+            for id_, proxy_str in proxy.items():
+                try:
+                    proxy_dict[int(id_)] = build_proxy(*validate_proxy(proxy_str))
+                except:
+                    logger.debug(f"Не удалось добавить {proxy_str}")
+                    logger.debug("TRACEBACK", exc_info=True)
+        except json.decoder.JSONDecodeError:
+            return {}
+        return proxy_dict
+
+
+def cache_disabled_plugins(disabled_plugins: list[str]) -> None:
+    """
+    Кэширует UUID отключенных плагинов.
+
+    :param disabled_plugins: список UUID отключенных плагинов.
+    """
+    if not os.path.exists("storage/cache"):
+        os.makedirs("storage/cache")
+
+    with open("storage/cache/disabled_plugins.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(disabled_plugins))
+
+
+def load_disabled_plugins() -> list[str]:
+    """
+    Загружает список UUID отключенных плагинов из кэша.
+
+    :return: список UUID отключенных плагинов.
+    """
+    if not os.path.exists("storage/cache/disabled_plugins.json"):
+        return []
+
+    with open("storage/cache/disabled_plugins.json", "r", encoding="utf-8") as f:
+        try:
+            return json.loads(f.read())
+        except json.decoder.JSONDecodeError:
+            return []
+
+def cache_pinned_plugins(pinned_plugins: list[str]) -> None:
+    """
+    Кэширует UUID закрепленных плагинов.
+
+    :param pinned_plugins: список UUID закрепленных плагинов.
+    """
+    if not os.path.exists("storage/cache"):
+        os.makedirs("storage/cache")
+
+    with open("storage/cache/pinned_plugins.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(pinned_plugins))
+
+def load_pinned_plugins() -> list[str]:
+    """
+    Загружает список UUID закрепленных плагинов из кэша.
+
+    :return: список UUID закрепленных плагинов.
+    """
+    if not os.path.exists("storage/cache/pinned_plugins.json"):
+        return []
+
+    with open("storage/cache/pinned_plugins.json", "r", encoding="utf-8") as f:
+        try:
+            return json.loads(f.read())
+        except json.decoder.JSONDecodeError:
+            return []
+
+
+def cache_old_users(old_users: dict[int, float]):
     """
     Сохраняет в кэш список пользователей, которые уже писали на аккаунт.
     """
@@ -107,17 +267,28 @@ def cache_old_users(old_users: list[int]):
         f.write(json.dumps(old_users, ensure_ascii=False))
 
 
-def load_old_users() -> list[int]:
+def load_old_users(greetings_cooldown: float) -> dict[int, float]:
     """
     Загружает из кэша список пользователей, которые уже писали на аккаунт.
 
     :return: список ID чатов.
     """
     if not os.path.exists(f"storage/cache/old_users.json"):
-        return []
+        return dict()
     with open(f"storage/cache/old_users.json", "r", encoding="utf-8") as f:
         users = f.read()
-    return json.loads(users)
+    try:
+        users = json.loads(users)
+    except json.decoder.JSONDecodeError:
+        return dict()
+    # todo убрать позже, конвертация для старых версий вертекса
+    if type(users) == list:
+        users = {user: time.time() for user in users}
+    else:
+        users = {int(user): time_ for user, time_ in users.items() if
+                 time.time() - time_ < greetings_cooldown * 24 * 60 * 60}
+    cache_old_users(users)
+    return users
 
 
 def create_greeting_text(vertex: Vertex):
@@ -128,7 +299,7 @@ def create_greeting_text(vertex: Vertex):
     balance = vertex.balance
     current_time = datetime.now()
     if current_time.hour < 4:
-        greetings = "Какая прекрасная ночь"
+        greetings = "Какая прекрасная ночь"  # locale
     elif current_time.hour < 12:
         greetings = "Доброе утро"
     elif current_time.hour < 17:
@@ -145,10 +316,12 @@ def create_greeting_text(vertex: Vertex):
     ]
 
     length = 60
-    greetings_text = f"\n{'-'*length}\n"
+    greetings_text = f"\n{'-' * length}\n"
     for line in lines:
-        greetings_text += line + " "*(length - len(line.replace("$CYAN", "").replace("$YELLOW", "").replace("$MAGENTA", "").replace("$RESET", "")) - 1) + "$RESET*\n"
-    greetings_text += f"{'-'*length}\n"
+        greetings_text += line + " " * (length - len(
+            line.replace("$CYAN", "").replace("$YELLOW", "").replace("$MAGENTA", "").replace("$RESET",
+                                                                                             "")) - 1) + "$RESET*\n"
+    greetings_text += f"{'-' * length}\n"
     return greetings_text
 
 
@@ -165,7 +338,7 @@ def time_to_str(time_: int):
     minutes = (time_ - days * 86400 - hours * 3600) // 60
     seconds = time_ - days * 86400 - hours * 3600 - minutes * 60
 
-    if not any([days, hours, minutes, seconds]):
+    if not any([days, hours, minutes, seconds]):  # locale
         return "0 сек"
     time_str = ""
     if days:
@@ -192,10 +365,10 @@ def get_month_name(month_number: int) -> str:
         "Апреля", "Мая", "Июня",
         "Июля", "Августа", "Сентября",
         "Октября", "Ноября", "Декабря"
-    ]
+    ]  # todo локализация
     if month_number > len(months):
         return months[0]
-    return months[month_number-1]
+    return months[month_number - 1]
 
 
 def get_products(path: str, amount: int = 1) -> list[list[str] | int] | None:
@@ -207,28 +380,29 @@ def get_products(path: str, amount: int = 1) -> list[list[str] | int] | None:
 
     :return: [[Товар/-ы], оставшееся кол-во товара]
     """
-    with open(path, "r", encoding="utf-8") as f:
-        products = f.read()
+    with get_products_file_lock(path):
+        with open(path, "r", encoding="utf-8") as f:
+            products = f.read()
 
-    products = products.split("\n")
+        products = products.split("\n")
 
-    # Убираем пустые элементы
-    products = list(itertools.filterfalse(lambda el: not el, products))
+        # Убираем пустые элементы
+        products = list(itertools.filterfalse(lambda el: not el, products))
 
-    if not products:
-        raise Utils.exceptions.NoProductsError(path)
+        if not products:
+            raise Utils.exceptions.NoProductsError(path)
 
-    elif len(products) < amount:
-        raise Utils.exceptions.NotEnoughProductsError(path, len(products), amount)
+        elif len(products) < amount:
+            raise Utils.exceptions.NotEnoughProductsError(path, len(products), amount)
 
-    got_products = products[:amount]
-    save_products = products[amount:]
-    amount = len(save_products)
+        got_products = products[:amount]
+        save_products = products[amount:]
+        amount = len(save_products)
 
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(save_products))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(save_products))
 
-    return [got_products, amount]
+        return [got_products, amount]
 
 
 def add_products(path: str, products: list[str], at_zero_position=False):
@@ -239,14 +413,19 @@ def add_products(path: str, products: list[str], at_zero_position=False):
     :param products: товары.
     :param at_zero_position: добавить товары в начало товарного файла.
     """
-    if not at_zero_position:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write("\n"+"\n".join(products))
-    else:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(products) + "\n" + text)
+    with get_products_file_lock(path):
+        if not at_zero_position:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n" + "\n".join(products))
+        else:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(products) + "\n" + text)
+
+
+def safe_text(text: str):
+    return "⁣".join(text)
 
 
 def format_msg_text(text: str, obj: FunPayAPI.types.Message | FunPayAPI.types.ChatShortcut) -> str:
@@ -262,12 +441,13 @@ def format_msg_text(text: str, obj: FunPayAPI.types.Message | FunPayAPI.types.Ch
     month_name = get_month_name(date_obj.month)
     date = date_obj.strftime("%d.%m.%Y")
     str_date = f"{date_obj.day} {month_name}"
-    str_full_date = str_date + f" {date_obj.year} года"
+    str_full_date = str_date + f" {date_obj.year} года"  # locale
 
     time_ = date_obj.strftime("%H:%M")
     time_full = date_obj.strftime("%H:%M:%S")
 
     username = obj.author if isinstance(obj, FunPayAPI.types.Message) else obj.name
+    chat_name = obj.chat_name if isinstance(obj, FunPayAPI.types.Message) else obj.name
     chat_id = str(obj.chat_id) if isinstance(obj, FunPayAPI.types.Message) else str(obj.id)
 
     variables = {
@@ -276,9 +456,10 @@ def format_msg_text(text: str, obj: FunPayAPI.types.Message | FunPayAPI.types.Ch
         "$date": date,
         "$time": time_,
         "$full_time": time_full,
-        "$username": username,
+        "$username": safe_text(username),
         "$message_text": str(obj),
-        "$chat_id": chat_id
+        "$chat_id": chat_id,
+        "$chat_name": safe_text(chat_name)
     }
 
     for var in variables:
@@ -299,21 +480,41 @@ def format_order_text(text: str, order: FunPayAPI.types.OrderShortcut | FunPayAP
     month_name = get_month_name(date_obj.month)
     date = date_obj.strftime("%d.%m.%Y")
     str_date = f"{date_obj.day} {month_name}"
-    str_full_date = str_date + f" {date_obj.year} года"
-
+    str_full_date = str_date + f" {date_obj.year} года"  # locale
     time_ = date_obj.strftime("%H:%M")
     time_full = date_obj.strftime("%H:%M:%S")
-
+    game = subcategory_fullname = subcategory = ""
+    try:
+        if isinstance(order, FunPayAPI.types.OrderShortcut) and not order.subcategory:
+            game, subcategory = order.subcategory_name.rsplit(", ", 1)
+            subcategory_fullname = f"{subcategory} {game}"
+        else:
+            subcategory_fullname = order.subcategory.fullname
+            game = order.subcategory.category.name
+            subcategory = order.subcategory.name
+    except:
+        logger.warning("Произошла ошибка при парсинге игры из заказа")  # locale
+        logger.debug("TRACEBACK", exc_info=True)
+    description = order.description if isinstance(order,
+                                                  FunPayAPI.types.OrderShortcut) else order.short_description if order.short_description else ""
+    params = order.lot_params_text if isinstance(order, FunPayAPI.types.Order) and order.lot_params else ""
     variables = {
         "$full_date_text": str_full_date,
         "$date_text": str_date,
         "$date": date,
         "$time": time_,
         "$full_time": time_full,
-        "$username": order.buyer_username,
-        "$order_desc": order.description if isinstance(order, FunPayAPI.types.OrderShortcut) else order.short_description if order.short_description else "",
-        "$order_title": order.description if isinstance(order, FunPayAPI.types.OrderShortcut) else order.short_description if order.short_description else "",
-        "$order_id": order.id
+        "$username": safe_text(order.buyer_username),
+        "$order_desc_and_params": f"{description}, {params}" if description and params else f"{description}{params}",
+        "$order_desc_or_params": description if description else params,
+        "$order_desc": description,
+        "$order_title": description,
+        "$order_params": params,
+        "$order_id": order.id,
+        "$order_link": f"https://funpay.com/orders/{order.id}/",
+        "$category_fullname": subcategory_fullname,
+        "$category": subcategory,
+        "$game": game
     }
 
     for var in variables:
@@ -346,3 +547,29 @@ def shut_down():
         process.terminate()
     except:
         pass
+
+
+def set_console_title(title: str) -> None:
+    """
+    Изменяет название консоли для Windows.
+    """
+    try:
+        if os.name == 'nt':  # Windows
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleTitleW(title)
+    except:
+        logger.warning("Произошла ошибка при изменении названия консоли")
+        logger.debug("TRACEBACK", exc_info=True)
+
+
+# Хеширование пароля
+def hash_password(password: str) -> str:
+    # Генерация соли и хеширование пароля
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password.encode(), salt)
+    return hashed_password.decode()  # Возвращаем хеш как строку
+
+
+# Проверка пароля
+def check_password(password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed_password.encode())  # Кодируем для проверки

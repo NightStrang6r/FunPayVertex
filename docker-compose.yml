@@ -1,8 +1,12 @@
-version: '3.3'
-
 services:
-  funpay:
-    build: ./
-    container_name: funpay-vertex 
+  funpayvertex:
+    build: .
+    container_name: funpayvertex
     restart: unless-stopped
+    stdin_open: true
     tty: true
+    volumes:
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+      - ./storage:/app/storage
+      - ./plugins:/app/plugins

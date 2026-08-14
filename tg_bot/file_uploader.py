@@ -3,12 +3,13 @@
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
 if TYPE_CHECKING:
     from vertex import Vertex
     from tg_bot.bot import TGBot
 
-from Utils import config_loader as cfg_loader, exceptions as excs, vertex_tools
+from Utils import config_loader as cfg_loader, exceptions as excs, vertex_tools, backup
 from telebot.types import InlineKeyboardButton as Button
 from tg_bot import utils, keyboards, CBT
 from tg_bot.static_keyboards import CLEAR_STATE_BTN
@@ -16,17 +17,18 @@ from telebot import types
 import logging
 import os
 
+logger = logging.getLogger("TGBot")  # locale#locale#locale
 
-logger = logging.getLogger("TGBot")
 
-
-def check_file(tg: TGBot, msg: types.Message) -> bool:
+def check_file(tg: TGBot, msg: types.Message, type_: Literal["py", "cfg", "json", "txt"] | None = None) -> bool:
     """
-    Проверяет выгруженный файл. Чистит состояние пользователя. Отправляет сообщение в TG в зависимости от ошибки.
+    Проверяет выгруженный файл. Отправляет сообщение в TG в зависимости от ошибки.
 
     :param tg: экземпляр TG бота.
 
     :param msg: экземпляр сообщения.
+
+    :param type_: формат файла.
 
     :return: True, если все ок, False, если файл проверку не прошел.
     """
@@ -34,8 +36,13 @@ def check_file(tg: TGBot, msg: types.Message) -> bool:
         tg.bot.send_message(msg.chat.id, "❌ Файл не обнаружен.")
         return False
     if not any((msg.document.file_name.endswith(".cfg"), msg.document.file_name.endswith(".txt"),
-                msg.document.file_name.endswith(".py"))):
+                msg.document.file_name.endswith(".py"), msg.document.file_name.endswith(".json"))):
         tg.bot.send_message(msg.chat.id, "❌ Файл должен быть текстовым.")
+        return False
+    if type_ is not None and not msg.document.file_name.endswith(f".{type_}"):
+        tg.bot.send_message(msg.chat.id, f"❌ Неправильный формат файла: "
+                                         f"<b><u>.{msg.document.file_name.split('.')[-1]}</u></b> "
+                                         f"(вместо <b><u>.{type_}</u></b>)")
         return False
     if msg.document.file_size >= 20971520:
         tg.bot.send_message(msg.chat.id, "❌ Размер файла не должен превышать 20МБ.")
@@ -88,11 +95,12 @@ def init_uploader(vertex: Vertex):
         Загружает файл с товарами.
         """
         tg.clear_state(m.chat.id, m.from_user.id, True)
-        if not check_file(tg, m):
+        if not check_file(tg, m, type_="txt"):
             return
-        if not download_file(tg, m, m.document.file_name,
-                             custom_path=f"storage/products"):
-            return
+        with vertex_tools.get_products_file_lock(f"storage/products/{m.document.file_name}"):
+            if not download_file(tg, m, m.document.file_name,
+                                 custom_path=f"storage/products"):
+                return
 
         try:
             products_count = vertex_tools.count_products(f"storage/products/{utils.escape(m.document.file_name)}")
@@ -125,7 +133,7 @@ def init_uploader(vertex: Vertex):
         Загружает и проверяет основной конфиг.
         """
         tg.clear_state(m.chat.id, m.from_user.id, True)
-        if not check_file(tg, m):
+        if not check_file(tg, m, type_="cfg"):
             return
         if not download_file(tg, m, "temp_main.cfg"):
             return
@@ -165,7 +173,7 @@ def init_uploader(vertex: Vertex):
         Загружает, проверяет и устанавливает конфиг автовыдачи.
         """
         tg.clear_state(m.chat.id, m.from_user.id, True)
-        if not check_file(tg, m):
+        if not check_file(tg, m, type_="cfg"):
             return
         if not download_file(tg, m, "temp_auto_response.cfg"):
             return
@@ -206,7 +214,7 @@ def init_uploader(vertex: Vertex):
         Загружает, проверяет и устанавливает конфиг автовыдачи.
         """
         tg.clear_state(m.chat.id, m.from_user.id, True)
-        if not check_file(tg, m):
+        if not check_file(tg, m, type_="cfg"):
             return
         if not download_file(tg, m, "temp_auto_delivery.cfg"):
             return
@@ -237,13 +245,14 @@ def init_uploader(vertex: Vertex):
 
     def upload_plugin(m: types.Message):
         offset = tg.get_state(m.chat.id, m.from_user.id)["data"]["offset"]
-        if not check_file(tg, m):
+        tg.clear_state(m.chat.id, m.from_user.id, True)
+        if not check_file(tg, m, type_="py"):
             return
         if not download_file(tg, m, f"{utils.escape(m.document.file_name)}",
                              custom_path=f"plugins"):
             return
 
-        logger.info(f"Пользователь $MAGENTA@{m.from_user.username} (id: {m.from_user.id})$RESET "
+        logger.info(f"[IMPORTANT] Пользователь $MAGENTA@{m.from_user.username} (id: {m.from_user.id})$RESET "
                     f"загрузил в бота плагин $YELLOWplugins/{m.document.file_name}$RESET.")
 
         keyboard = types.InlineKeyboardMarkup() \
@@ -269,25 +278,23 @@ def init_uploader(vertex: Vertex):
         try:
             file_info = tg.bot.get_file(photo.file_id)
             file = tg.bot.download_file(file_info.file_path)
-            image_id = vertex.account.upload_image(file)
-            result = vertex.account.send_message(chat_id, None, username, image_id)
+            image_id = vertex.account.upload_image(file, type_="chat")
+            result = vertex.send_message(chat_id, f"$photo={image_id}", username, watermark=False)
             if not result:
-                tg.bot.reply_to(m, f'❌ Не удалось отправить сообщение в переписку '
-                                   f'<a href="https://funpay.com/chat/?node={chat_id}">{username}</a>. '
-                                   f'Подробнее в файле <code>logs/log.log</code>',
-                                reply_markup=keyboards.reply(chat_id, username, again=True))
-                return
+                raise Exception("Нету сообщений")
             tg.bot.reply_to(m, f'✅ Сообщение отправлено в переписку '
                                f'<a href="https://funpay.com/chat/?node={chat_id}">{username}</a>.',
                             reply_markup=keyboards.reply(chat_id, username, again=True))
         except:
+            logger.warning("Произошла ошибка при отправке изображения.")
+            logger.debug("TRACEBACK", exc_info=True)
             tg.bot.reply_to(m, f'❌ Не удалось отправить сообщение в переписку '
                                f'<a href="https://funpay.com/chat/?node={chat_id}">{username}</a>. '
                                f'Подробнее в файле <code>logs/log.log</code>',
                             reply_markup=keyboards.reply(chat_id, username, again=True))
             return
 
-    def upload_image(m: types.Message):
+    def upload_image(m: types.Message, type_: Literal["chat", "offer"] = "chat"):
         tg.clear_state(m.chat.id, m.from_user.id, True)
         if not m.photo:
             tg.bot.send_message(m.chat.id, "❌ Поддерживаются только форматы <code>.png</code>, <code>.jpg</code>, "
@@ -301,16 +308,47 @@ def init_uploader(vertex: Vertex):
         try:
             file_info = tg.bot.get_file(photo.file_id)
             file = tg.bot.download_file(file_info.file_path)
-            image_id = vertex.account.upload_image(file)
+            image_id = vertex.account.upload_image(file, type_=type_)
         except:
             tg.bot.reply_to(m, f'❌ Не удалось отправить выгрузить изображение. '
                                f'Подробнее в файле <code>logs/log.log</code>')
             return
+        if type_ == "chat":
+            s = f"Используйте этот ID в текстах автовыдачи/автоответа с переменной " \
+                f"<code>$photo</code>\n\n" \
+                f"Например: <code>$photo={image_id}</code>"
+        elif type_ == "offer":
+            s = f"Используйте этот ID для добавления картинок к лотам."
         bot.reply_to(m, f"✅ Изображение выгружено на сервер FunPay.\n\n"
-                        f"<b>ID:</b> <code>{image_id}</code>\n\n"
-                        f"Используйте этот ID в текстах автовыдачи/автоответа с переменной "
-                        f"<code>$photo</code>\n\n"
-                        f"Например: <code>$photo={image_id}</code>")
+                        f"<b>ID:</b> <code>{image_id}</code>\n\n{s}")
+
+    def upload_chat_image(m: types.Message):
+        upload_image(m, type_="chat")
+
+    def upload_offer_image(m: types.Message):
+        upload_image(m, type_="offer")
+
+    def upload_backup(m: types.Message):
+        tg.clear_state(m.chat.id, m.from_user.id, True)
+        if not m.document:
+            tg.bot.send_message(m.chat.id, "❌ Файл не обнаружен.")
+            return
+        if not m.document.file_name.endswith(".zip"):
+            tg.bot.send_message(m.chat.id, f"❌ Неправильный формат файла: "
+                                           f"<b><u>.{m.document.file_name.split('.')[-1]}</u></b> "
+                                           f"(вместо <b><u>.zip</u></b>)")
+            return
+        if not download_file(tg, m, "backup.zip"):
+            return
+        if not backup.extract_backup_archive():
+            tg.bot.send_message(m.chat.id, "❌ Возникла ошибка при распаковке архива.")
+            return
+        tg.bot.send_message(m.chat.id, "✅ Бекап загружен.")
+
+        if not backup.install_backup():
+            tg.bot.send_message(m.chat.id, "❌ Возникла ошибка при переносе файлов.")
+            return
+        tg.bot.send_message(m.chat.id, "✅ Бекап использован. Используй команду /restart.")
 
     tg.cbq_handler(act_upload_products_file, lambda c: c.data == CBT.UPLOAD_PRODUCTS_FILE)
     tg.cbq_handler(act_upload_auto_response_config, lambda c: c.data == "upload_auto_response_config")
@@ -321,8 +359,11 @@ def init_uploader(vertex: Vertex):
     tg.file_handler("upload_auto_response_config", upload_auto_response_config)
     tg.file_handler("upload_auto_delivery_config", upload_auto_delivery_config)
     tg.file_handler("upload_main_config", upload_main_config)
+    tg.file_handler(CBT.UPLOAD_PLUGIN, upload_plugin)
     tg.file_handler(CBT.SEND_FP_MESSAGE, send_funpay_image)
-    tg.file_handler(CBT.UPLOAD_IMAGE, upload_image)
+    tg.file_handler(CBT.UPLOAD_CHAT_IMAGE, upload_chat_image)
+    tg.file_handler(CBT.UPLOAD_OFFER_IMAGE, upload_offer_image)
+    tg.file_handler(CBT.UPLOAD_BACKUP, upload_backup)
 
 
 BIND_TO_PRE_INIT = [init_uploader]

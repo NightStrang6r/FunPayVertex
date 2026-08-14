@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from vertex import Vertex
 
@@ -15,7 +16,6 @@ import datetime
 import logging
 
 from locales.localizer import Localizer
-
 
 logger = logging.getLogger("TGBot")
 localizer = Localizer()
@@ -73,7 +73,7 @@ def init_auto_response_cp(vertex: Vertex, *args):
         Добавляет новую команду в конфиг.
         """
         tg.clear_state(m.chat.id, m.from_user.id, True)
-        raw_command = m.text.strip().lower()
+        raw_command = m.text.strip().lower().replace("\n", "")
         commands = [i.strip() for i in raw_command.split("|") if i.strip()]
         error_keyboard = K().row(B(_("gl_back"), callback_data=f"{CBT.CATEGORY}:ar"),
                                  B(_("ar_add_another"), callback_data=CBT.ADD_CMD))
@@ -89,11 +89,13 @@ def init_auto_response_cp(vertex: Vertex, *args):
         vertex.RAW_AR_CFG.add_section(raw_command)
         vertex.RAW_AR_CFG.set(raw_command, "response", "Данной команде необходимо настроить текст ответа :(")
         vertex.RAW_AR_CFG.set(raw_command, "telegramNotification", "0")
+        vertex.RAW_AR_CFG.set(raw_command, "enabled", "1")
 
         for cmd in commands:
             vertex.AR_CFG.add_section(cmd)
             vertex.AR_CFG.set(cmd, "response", "Данной команде необходимо настроить текст ответа :(")
             vertex.AR_CFG.set(cmd, "telegramNotification", "0")
+            vertex.AR_CFG.set(cmd, "enabled", "1")
 
         vertex.save_config(vertex.RAW_AR_CFG, "configs/auto_response.cfg")
 
@@ -121,6 +123,7 @@ def init_auto_response_cp(vertex: Vertex, *args):
         command_obj = vertex.RAW_AR_CFG[command]
         notification_text = command_obj.get("notificationText")
         notification_text = notification_text if notification_text else "Пользователь $username ввел команду $message_text."
+        # locale
 
         message = f"""<b>[{utils.escape(command)}]</b>\n
 <b><i>{_('ar_response_text')}:</i></b> <code>{utils.escape(command_obj["response"])}</code>\n
@@ -137,7 +140,7 @@ def init_auto_response_cp(vertex: Vertex, *args):
         command_index, offset = int(split[1]), int(split[2])
 
         variables = ["v_date", "v_date_text", "v_full_date_text", "v_time", "v_full_time", "v_username",
-                     "v_message_text", "v_chat_id", "v_photo"]
+                     "v_message_text", "v_chat_id", "v_chat_name", "v_photo", "v_sleep"]
         text = f"{_('v_edit_response_text')}\n\n{_('v_list')}:\n" + "\n".join(_(i) for i in variables)
 
         result = bot.send_message(c.message.chat.id, text, reply_markup=CLEAR_STATE_BTN())
@@ -177,7 +180,7 @@ def init_auto_response_cp(vertex: Vertex, *args):
         command_index, offset = int(split[1]), int(split[2])
 
         variables = ["v_date", "v_date_text", "v_full_date_text", "v_time", "v_full_time", "v_username",
-                     "v_message_text", "v_chat_id", "v_photo"]
+                     "v_message_text", "v_chat_id", "v_chat_name"]
         text = f"{_('v_edit_notification_text')}\n\n{_('v_list')}:\n" + "\n".join(_(i) for i in variables)
 
         result = bot.send_message(c.message.chat.id, text, reply_markup=CLEAR_STATE_BTN())
@@ -205,18 +208,19 @@ def init_auto_response_cp(vertex: Vertex, *args):
             vertex.AR_CFG.set(cmd, "notificationText", notification_text)
         vertex.save_config(vertex.RAW_AR_CFG, "configs/auto_response.cfg")
 
-        logger.info(_("log_ar_notification_text_changed", m.from_user.username, m.from_user.id, command, notification_text))
+        logger.info(
+            _("log_ar_notification_text_changed", m.from_user.username, m.from_user.id, command, notification_text))
         keyboard = K().row(B(_("gl_back"), callback_data=f"{CBT.EDIT_CMD}:{command_index}:{offset}"),
                            B(_("gl_edit"), callback_data=f"{CBT.EDIT_CMD_NOTIFICATION_TEXT}:{command_index}:{offset}"))
         bot.reply_to(m, _("ar_notification_text_changed", utils.escape(command), utils.escape(notification_text)),
                      reply_markup=keyboard)
 
-    def switch_notification(c: CallbackQuery):
+    def switch_command_settings(c: CallbackQuery):
         """
         Вкл / Выкл уведомление об использовании команды.
         """
         split = c.data.split(":")
-        command_index, offset = int(split[1]), int(split[2])
+        command_index, offset, setting = int(split[1]), int(split[2]), split[3]
         bot.answer_callback_query(c.id)
         if not check_command_exists(command_index, c.message, reply_mode=False):
             bot.answer_callback_query(c.id)
@@ -225,13 +229,13 @@ def init_auto_response_cp(vertex: Vertex, *args):
         command = vertex.RAW_AR_CFG.sections()[command_index]
         commands = [i.strip() for i in command.split("|") if i.strip()]
         command_obj = vertex.RAW_AR_CFG[command]
-        if command_obj.get("telegramNotification") in [None, "0"]:
+        if command_obj.get(setting) in [None, "0"]:
             value = "1"
         else:
             value = "0"
-        vertex.RAW_AR_CFG.set(command, "telegramNotification", value)
+        vertex.RAW_AR_CFG.set(command, setting, value)
         for cmd in commands:
-            vertex.AR_CFG.set(cmd, "telegramNotification", value)
+            vertex.AR_CFG.set(cmd, setting, value)
         vertex.save_config(vertex.RAW_AR_CFG, "configs/auto_response.cfg")
         logger.info(_("log_param_changed", c.from_user.username, c.from_user.id, command, value))
         open_edit_command_cp(c)
@@ -273,7 +277,7 @@ def init_auto_response_cp(vertex: Vertex, *args):
     tg.msg_handler(edit_command_notification,
                    func=lambda m: tg.check_state(m.chat.id, m.from_user.id, CBT.EDIT_CMD_NOTIFICATION_TEXT))
 
-    tg.cbq_handler(switch_notification, lambda c: c.data.startswith(f"{CBT.SWITCH_CMD_NOTIFICATION}:"))
+    tg.cbq_handler(switch_command_settings, lambda c: c.data.startswith(f"{CBT.SWITCH_CMD_SETTING}:"))
     tg.cbq_handler(del_command, lambda c: c.data.startswith(f"{CBT.DEL_CMD}:"))
 
 

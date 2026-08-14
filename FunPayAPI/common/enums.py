@@ -39,7 +39,8 @@ class MessageTypes(Enum):
     """Несистемное сообщение."""
 
     ORDER_PURCHASED = 1
-    """Покупатель X оплатил заказ #Y. Лот. X, не забудьте потом нажать кнопку «Подтвердить выполнение заказа»."""
+    """Покупатель X оплатил заказ #Y. Лот. X, не забудьте потом нажать кнопку «Подтвердить выполнение заказа» или
+     «Подтвердить получение валюты»."""
 
     ORDER_CONFIRMED = 2
     """Покупатель X подтвердил успешное выполнение заказа #Y и отправил деньги продавцу Z."""
@@ -77,7 +78,7 @@ class MessageTypes(Enum):
     DISCORD = 13
     """Вы можете перейти в Discord. Внимание: общение за пределами сервера FunPay считается нарушением правил."""
 
-    SCAM_WARNING = 14
+    DEAR_VENDORS = 14
     """Уважаемые продавцы, не доверяйте сообщениям в чате! Перед выполнением заказа всегда проверяйте наличие оплаты в разделе «Мои продажи»."""
 
     REFUND_BY_ADMIN = 15
@@ -94,6 +95,10 @@ class OrderStatuses(Enum):
     """Заказ закрыт."""
     REFUNDED = 2
     """Средства по заказу возвращены."""
+    PARTIALLY_REFUNDED = 3
+    """Средства по заказу частично возвращены."""
+    UNPAID = 5
+    """Заказ не оплачен."""
 
 
 class SubCategoryTypes(Enum):
@@ -116,4 +121,46 @@ class Currency(Enum):
     """Рубль"""
     EUR = 2
     """Евро"""
+    UNKNOWN = 3
+    """Неизвестная валюта"""
 
+    def __str__(self):
+        if self == Currency.USD:
+            return "$"
+        if self == Currency.RUB:
+            return "₽"
+        if self == Currency.EUR:
+            return "€"
+        return "¤"
+
+    @property
+    def code(self) -> str:
+        if self == Currency.USD:
+            return "usd"
+        if self == Currency.RUB:
+            return "rub"
+        if self == Currency.EUR:
+            return "eur"
+        raise Exception("Неизвестная валюта.")
+
+
+class Wallet(Enum):
+    """
+    В данном классе перечислены все кошельки для вывода средств с баланса FunPay.
+    """
+    QIWI = 0
+    """Qiwi кошелек."""
+    BINANCE = 1
+    """Binance Pay."""
+    TRC = 2
+    """USDT TRC20."""
+    CARD_RUB = 3
+    """Рублевая банковская карта."""
+    CARD_USD = 4
+    """Долларовая банковская карта."""
+    CARD_EUR = 5
+    """Евро банковская карта."""
+    WEBMONEY = 6
+    """WebMoney WMZ."""
+    YOUMONEY = 7
+    """ЮMoney."""

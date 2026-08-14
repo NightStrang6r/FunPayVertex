@@ -9,6 +9,7 @@ import os
 from Utils.exceptions import (ParamNotFoundError, EmptyValueError, ValueNotValidError, SectionNotFoundError,
                               ConfigParseError, ProductsFileNotFoundError, NoProductVarError,
                               SubCommandAlreadyExists, DuplicateSectionErrorWrapper)
+from Utils.vertex_tools import hash_password, build_proxy
 
 
 def check_param(param_name: str, section: SectionProxy, valid_values: list[str | None] | None = None,
@@ -50,7 +51,7 @@ def create_config_obj(config_path: str) -> ConfigParser:
 
     :return: объект конфига.
     """
-    config = ConfigParser(delimiters=(":", ), interpolation=None)
+    config = ConfigParser(delimiters=(":",), interpolation=None)
     config.optionxform = str
     config.read_file(codecs.open(config_path, "r", "utf8"))
     return config
@@ -75,14 +76,17 @@ def load_main_config(config_path: str):
             "multiDelivery": ["0", "1"],
             "autoRestore": ["0", "1"],
             "autoDisable": ["0", "1"],
-            "oldMsgGetMode": ["0", "1"]
+            "oldMsgGetMode": ["0", "1"],
+            "keepSentMessagesUnread": ["0", "1"],
+            "locale": ["ru", "en", "uk"]
         },
 
         "Telegram": {
             "enabled": ["0", "1"],
             "token": "any+empty",
-            "secretKey": "any",
-            "proxy": "any+empty"
+            "secretKeyHash": "any",
+            "proxy": "any+empty",
+            "blockLogin": ["0", "1"]
         },
 
         "BlockList": {
@@ -100,16 +104,19 @@ def load_main_config(config_path: str):
             "notifyOnlyMyMessages": ["0", "1"],
             "notifyOnlyFPMessages": ["0", "1"],
             "notifyOnlyBotMessages": ["0", "1"],
+            "showImageName": ["0", "1"]
         },
 
         "Greetings": {
-            "cacheInitChats": ["0", "1"],
             "ignoreSystemMessages": ["0", "1"],
+            "onlyNewChats": ["0", "1"],
             "sendGreetings": ["0", "1"],
-            "greetingsText": "any"
+            "greetingsText": "any",
+            "greetingsCooldown": "any"
         },
 
         "OrderConfirm": {
+            "watermark": ["0", "1"],
             "sendReply": ["0", "1"],
             "replyText": "any"
         },
@@ -129,17 +136,14 @@ def load_main_config(config_path: str):
 
         "Proxy": {
             "enable": ["0", "1"],
-            "ip": "any+empty",
-            "port": "any+empty",
-            "login": "any+empty",
-            "password": "any+empty",
+            "proxy": "any+empty",
             "check": ["0", "1"]
         },
 
         "Other": {
             "watermark": "any+empty",
             "requestsDelay": [str(i) for i in range(1, 101)],
-            "language": ["ru", "eng"]
+            "language": ["ru", "en", "uk"]
         }
     }
 
@@ -147,14 +151,22 @@ def load_main_config(config_path: str):
         if section_name not in config.sections():
             raise ConfigParseError(config_path, section_name, SectionNotFoundError())
 
+        # UPDATE
+        if section_name == "Greetings" and "cacheInitChats" in config[section_name]:
+            config.remove_option(section_name, "cacheInitChats")
+            with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                config.write(f)
+        # END OF UPDATE
+
         for param_name in values[section_name]:
 
-            # UPDATE 009
+            # UPDATE
             if section_name == "FunPay" and param_name == "oldMsgGetMode" and param_name not in config[section_name]:
                 config.set("FunPay", "oldMsgGetMode", "0")
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
-            elif section_name == "Greetings" and param_name == "ignoreSystemMessages" and param_name not in config[section_name]:
+            elif section_name == "Greetings" and param_name == "ignoreSystemMessages" and param_name not in config[
+                section_name]:
                 config.set("Greetings", "ignoreSystemMessages", "0")
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
@@ -162,11 +174,75 @@ def load_main_config(config_path: str):
                 config.set("Other", "language", "ru")
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
-            # END OF UPDATE 009
+            elif section_name == "Other" and param_name == "language" and config[section_name][param_name] == "eng":
+                config.set("Other", "language", "en")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Greetings" and param_name == "greetingsCooldown" and param_name not in config[
+                section_name]:
+                config.set("Greetings", "greetingsCooldown", "2")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "OrderConfirm" and param_name == "watermark" and param_name not in config[
+                section_name]:
+                config.set("OrderConfirm", "watermark", "1")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "FunPay" and param_name == "keepSentMessagesUnread" and \
+                    param_name not in config[section_name]:
+                config.set("FunPay", "keepSentMessagesUnread", "0")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "NewMessageView" and param_name == "showImageName" and \
+                    param_name not in config[section_name]:
+                config.set("NewMessageView", "showImageName", "1")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Telegram" and param_name == "blockLogin" and \
+                    param_name not in config[section_name]:
+                config.set("Telegram", "blockLogin", "0")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Telegram" and param_name == "secretKeyHash" and \
+                    param_name not in config[section_name]:
+                config.set(section_name, "secretKeyHash", hash_password(config[section_name]["secretKey"]))
+                config.remove_option(section_name, "secretKey")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "FunPay" and param_name == "locale" and \
+                    param_name not in config[section_name]:
+                config.set(section_name, "locale", "ru")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Other" and param_name == "watermark" and \
+                    param_name in config[section_name] and "𝑪𝒂𝒓𝒅𝒊𝒏𝒂𝒍" in config[section_name][param_name]:
+                config.set(section_name, param_name, "🐦")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Greetings" and param_name == "onlyNewChats" and param_name not in config[
+                section_name]:
+                config.set("Greetings", "onlyNewChats", "0")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
+            elif section_name == "Proxy" and param_name == "proxy" and param_name not in config[section_name]:
+                if config["Proxy"]["ip"] and config["Proxy"]["port"]:
+                    config.set("Proxy", "proxy", "")
+                else:
+                    config.set("Proxy", "proxy", build_proxy(None, config["Proxy"]["login"],
+                                                             config["Proxy"]["password"], config["Proxy"]["ip"],
+                                                             config["Proxy"]["port"]))
+                config.remove_option(section_name, "login")
+                config.remove_option(section_name, "password")
+                config.remove_option(section_name, "ip")
+                config.remove_option(section_name, "port")
+                with open("configs/_main.cfg", "w", encoding="utf-8") as f:
+                    config.write(f)
             elif section_name == "Telegram" and param_name == "proxy" and param_name not in config[section_name]:
                 config.set("Telegram", "proxy", "")
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
+
+            # END OF UPDATE
 
             try:
                 if values[section_name][param_name] == "any":
@@ -199,9 +275,13 @@ def load_auto_response_config(config_path: str):
         try:
             check_param("response", config[command])
             check_param("telegramNotification", config[command], valid_values=["0", "1"], raise_if_not_exists=False)
+            check_param("enabled", config[command], valid_values=["0", "1"], raise_if_not_exists=False)
             check_param("notificationText", config[command], raise_if_not_exists=False)
         except (ParamNotFoundError, EmptyValueError, ValueNotValidError) as e:
             raise ConfigParseError(config_path, command, e)
+
+        if not config.has_option(command, "enabled"):
+            config.set(command, "enabled", "1")
 
         if "|" in command:
             command_sets.append(command)
@@ -230,7 +310,11 @@ def load_raw_auto_response_config(config_path: str):
 
     :return: спарсеный конфиг команд.
     """
-    return create_config_obj(config_path)
+    config = create_config_obj(config_path)
+    for raw_commands in config.sections():
+        if not config.has_option(raw_commands, "enabled"):
+            config.set(raw_commands, "enabled", "1")
+    return config
 
 
 def load_auto_delivery_config(config_path: str):
