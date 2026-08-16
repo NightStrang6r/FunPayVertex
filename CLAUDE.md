@@ -64,6 +64,13 @@ Threading: `Vertex.run()` starts the raise loop and session-update loop as daemo
 
 Plugins execute arbitrary Python with the bot's privileges — the README warning about untrusted plugins is deliberate, keep it.
 
+**Cardinal compatibility shims.** Third-party plugins written for FunPayCardinal import the pre-rebrand names — `from Utils import cardinal_tools` (a *runtime* import) and `from cardinal import Cardinal` (usually under `TYPE_CHECKING`). Two shims keep those working, so the base is a drop-in replacement for Cardinal and existing plugins need no edits:
+
+- `Utils/cardinal_tools.py` re-exports everything public from `Utils/vertex_tools.py`;
+- `cardinal.py` re-exports `Vertex` under the name `Cardinal` (same class object, so `isinstance` still works) plus `get_cardinal`.
+
+Do not delete them without checking `plugins/` for the old names first — a missing import makes `load_plugins` skip the plugin with a single log line, which reads as "the plugin silently stopped working". New code should use the new names.
+
 ### Telegram control panel
 
 `tg_bot/bot.py` (`TGBot`) wraps pyTelegramBotAPI and adds: authorization by `secretKey`, per-chat notification toggles (`NotificationTypes` in `tg_bot/utils.py`), and a user-state machine (`set_state`/`get_state`/`clear_state`) used for multi-step input flows.
