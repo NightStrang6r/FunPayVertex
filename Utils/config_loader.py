@@ -225,16 +225,22 @@ def load_main_config(config_path: str):
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
             elif section_name == "Proxy" and param_name == "proxy" and param_name not in config[section_name]:
-                if config["Proxy"]["ip"] and config["Proxy"]["port"]:
-                    config.set("Proxy", "proxy", "")
+                # Приведение старых схем секции [Proxy] к одному ключу proxy.
+                # Схем в обиходе три: нынешняя (proxy), промежуточная
+                # (ip/port/login/password) и самая ранняя (connection). Ключей
+                # может не быть вовсе - тогда прокси просто не настроен, и
+                # обращение по индексу роняло загрузку конфига с KeyError.
+                section = config[section_name]
+                ip, port = section.get("ip", "").strip(), section.get("port", "").strip()
+                if ip and port:
+                    value = build_proxy(None, section.get("login", "").strip(),
+                                        section.get("password", "").strip(), ip, port)
                 else:
-                    config.set("Proxy", "proxy", build_proxy(None, config["Proxy"]["login"],
-                                                             config["Proxy"]["password"], config["Proxy"]["ip"],
-                                                             config["Proxy"]["port"]))
-                config.remove_option(section_name, "login")
-                config.remove_option(section_name, "password")
-                config.remove_option(section_name, "ip")
-                config.remove_option(section_name, "port")
+                    # Ранняя схема хранила адрес целиком в одном ключе.
+                    value = section.get("connection", "").strip()
+                config.set("Proxy", "proxy", value)
+                for old_option in ("login", "password", "ip", "port", "connection"):
+                    config.remove_option(section_name, old_option)
                 with open("configs/_main.cfg", "w", encoding="utf-8") as f:
                     config.write(f)
             elif section_name == "Telegram" and param_name == "proxy" and param_name not in config[section_name]:
