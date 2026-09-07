@@ -1,26 +1,4 @@
 import time
-from pip._internal.cli.main import main
-
-# todo убрать когда-то
-
-try:
-    import lxml
-except ModuleNotFoundError:
-    main(["install", "-U", "lxml>=5.3.0"])
-except:
-    pass
-try:
-    import bcrypt
-except ModuleNotFoundError:
-    main(["install", "-U", "bcrypt>=4.2.0"])
-except:
-    pass
-try:
-    import socks
-except ModuleNotFoundError:
-    main(["install", "-U", "pysocks>=1.7.1"])
-except:
-    pass
 import Utils.vertex_tools
 import Utils.config_loader as cfg_loader
 from first_setup import first_setup

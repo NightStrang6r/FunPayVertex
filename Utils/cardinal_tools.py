@@ -1,16 +1,7 @@
 """
 Слой совместимости для плагинов, написанных под FunPayCardinal.
 
-При ребрендинге модуль `Utils/cardinal_tools.py` был переименован в
-`Utils/vertex_tools.py`. Сторонние плагины импортируют его по старому имени
-прямо в рантайме, например:
-
-    from Utils import cardinal_tools
-
-Без этого модуля такой плагин падал бы с ImportError, и загрузчик молча
-пропускал бы его (`Vertex.load_plugins` перехватывает ошибку и пишет одну
-строку в лог). Поэтому старое имя сохранено как псевдоним.
-
+Старое имя модуля сохранено как псевдоним `Utils/vertex_tools.py`.
 Новый код должен импортировать `Utils.vertex_tools` напрямую.
 """
 from Utils import vertex_tools as _vertex_tools
