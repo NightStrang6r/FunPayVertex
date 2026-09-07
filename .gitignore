@@ -1,8 +1,6 @@
 /venv
 /venv2
-/__pycache__
 /.idea
-/FunPayAPI/__pycache__
 /logs
 /storage
 /configs
@@ -11,3 +9,4 @@
 /dist
 test.py
 *.zip
+__pycache__
