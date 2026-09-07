@@ -108,7 +108,7 @@ docker-compose up -d --build
 
 ## :question: Мне нужна помощь
 
-Задать вопрос можно в [Telegram чате](https://t.me/funpayplace) или в [Discord](https://dsc.gg/funpay).
+Задать вопрос можно в [Telegram чате](https://t.me/funpayplace) или в [Discord](https://dsc.gg/funpaycom).
 
 ## :pray: Благодарности
 
