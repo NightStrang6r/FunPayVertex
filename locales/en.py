@@ -584,7 +584,6 @@ log_sending_greetings = "User $YELLOW{} (CID: {})$RESET wrote for the first time
 log_new_cmd = "Received the command $YELLOW{}$RESET in the chat with the user $YELLOW{} (CID: {})$RESET."
 ntfc_new_order = "💰 <b>New order:</b> <code>{}</code>\n\n<b><i>🙍‍♂️ Buyer:</i></b>  <code>{}</code>\n" \
                  "<b><i>💵 Order amount:</i></b>  <code>{}</code>\n<b><i>📇 ID:</i></b> <code>#{}</code>\n\n<i>{}</i>"
-ntfc_new_order_not_in_cfg = "ℹ️ The goods will not be delivered because auto-delivery is not linked to the lot."
 ntfc_new_order_ad_disabled = "ℹ️ The goods will not be delivered because auto-delivery is disabled in global switches."
 ntfc_new_order_ad_disabled_for_lot = "ℹ️ The goods will not be delivered because auto-delivery is disabled for this item."
 ntfc_new_order_user_blocked = "ℹ️ The goods will not be delivered, because the user is on the black list and the auto-delivery lock is on."

@@ -567,7 +567,9 @@ def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
     if e.order.buyer_username in c.blacklist and c.MAIN_CFG["BlockList"].getboolean("blockNewOrderNotification"):
         return
     if not (config_obj := getattr(e, "config_section_obj")):
-        delivery_info = _("ntfc_new_order_not_in_cfg")
+        # Для лота без авто-выдачи пояснение не выводится: оно не несёт
+        # информации - у большинства лотов авто-выдачи нет по определению.
+        delivery_info = ""
     else:
         if not c.autodelivery_enabled:
             delivery_info = _("ntfc_new_order_ad_disabled")
@@ -579,6 +581,10 @@ def send_new_order_notification_handler(c: Vertex, e: NewOrderEvent, *args):
             delivery_info = _("ntfc_new_order_will_be_delivered")
     text = _("ntfc_new_order", f"{utils.escape(e.order.description)}, {utils.escape(e.order.subcategory_name)}",
              e.order.buyer_username, f"{e.order.price} {e.order.currency}", e.order.id, delivery_info)
+    if not delivery_info:
+        # Шаблон оборачивает пояснение в курсив и отбивает пустой строкой.
+        # Без пояснения от этого остаётся "<i></i>" и висячий перевод строки.
+        text = text.replace("<i></i>", "").rstrip()
 
     chat = c.account.get_chat_by_name(e.order.buyer_username)
     if chat:

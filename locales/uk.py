@@ -586,7 +586,6 @@ log_sending_greetings = "Користувач $YELLOW{} (CID: {})$RESET напи
 log_new_cmd = "Отримано команду $YELLOW{}$RESET у чаті з користувачем $YELLOW{} (CID: {})$RESET."
 ntfc_new_order = "💰 <b>Нове замовлення:</b> <code>{}</code>\n\n<b><i>🙍‍♂️ Покупець:</i></b>  <code>{}</code>\n" \
                  "<b><i>💵 Сума:</i></b>  <code>{}</code>\n<b><i>📇 ID:</i></b> <code>#{}</code>\n\n<i>{}</i>"
-ntfc_new_order_not_in_cfg = "ℹ️ Товар не буде виданий, оскільки до лоту не прив'язана авто-видача."
 ntfc_new_order_ad_disabled = "ℹ️ Товар не буде виданий, оскільки авто-видача вимкнена у глобальних перемикачах."
 ntfc_new_order_ad_disabled_for_lot = "ℹ️ Товар не буде виданий, оскільки авто-видача вимкнена для даного лота."
 ntfc_new_order_user_blocked = "ℹ️ Товар не буде виданий, оскільки користувач знаходиться в ЧС і включено блокування авто-видачі."
