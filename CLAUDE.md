@@ -8,12 +8,12 @@ FunPay Vertex — a Python bot that automates a FunPay marketplace seller accoun
 
 The codebase is Russian — docstrings, comments, log messages and UI text. Match that when adding code.
 
-**The codebase was rebased onto FunPayCardinal in Aug 2026** (see `MIGRATION_PLAN.md`). Anything you remember about the pre-rebase Vertex (v0.1.7) is likely wrong: the plugin system is now live, there are three locales, and the module layout changed. Origin is credited in the README; do not remove that section.
+The credits section in the README records where this code came from — keep it.
 
 Two subsystems were deliberately removed and must not be reintroduced:
 
-- **Announcements** — polled a GitHub Gist every 10 min and pushed arbitrary text/photos/inline-keyboards into the operator's Telegram.
-- **Auto-update** (`Utils/updater.py`) — downloaded a zipball from a third-party repo and unpacked it over the live installation with no checksum or signature check. Only its backup half survives, as `Utils/backup.py`.
+- **Announcements** — polled a remote Gist every 10 min and pushed arbitrary text/photos/inline-keyboards into the operator's Telegram.
+- **Auto-update** — downloaded a zipball from a third-party repo and unpacked it over the live installation with no checksum or signature check. Only its backup half survives, as `Utils/backup.py`. The bot does not update itself; updates are manual.
 
 As a result the only hosts the code contacts are `funpay.com`, `sfunpay.com` (CDN) and `api.ipify.org` (proxy check). If you add an outbound request to anything else, flag it explicitly.
 
@@ -94,8 +94,8 @@ Outgoing FunPay messages go through `Vertex.send_message()` → `parse_message_e
 
 Bot-sent messages are marked two ways, and both matter for loop prevention and for the message badges in Telegram:
 
-- an invisible character prefix — `bot_character` (this bot) vs `old_bot_character` (pre-rebase Vertex bots), giving `by_bot` / `by_vertex`;
-- the uploaded image filename — see the comment block in `FunPayAPI/account.py` around the `funpay_vertex` / `funpay_cardinal` check. That block is hand-written and deliberately matches both families; do not "simplify" it into a single condition.
+- an invisible character prefix — `bot_character` (this bot) vs `old_bot_character` (older bots of the same family), giving `by_bot` / `by_vertex`;
+- the uploaded image filename — see the commented block in `FunPayAPI/account.py` around the filename check. Those strings are what other bots actually put in the filename, i.e. wire data, not branding: the block deliberately matches several bot families, so do not "simplify" it into a single condition or rename the values.
 
 ### Localization and logging
 
@@ -107,4 +107,4 @@ Logging is configured once in `main.py` from `Utils.logger.LOGGER_CONFIG` (logge
 
 ### Line endings
 
-Both the pre-rebase tree and the imported one carry mixed CRLF/LF. Diffs are unreliable without `diff --strip-trailing-cr`, and a file can look 100% rewritten when it is nearly identical. There is no `.gitattributes` yet — adding one is on the migration checklist.
+The tree carries mixed CRLF/LF. Diffs are unreliable without `diff --strip-trailing-cr`, and a file can look 100% rewritten when it is nearly identical. There is no `.gitattributes` yet — worth adding.
