@@ -1169,23 +1169,10 @@ class TGBot:
 
     def edit_bot(self):
         """
-        Изменяет описания и название бота.
-        """
+        Изменяет описания бота.
 
-        name = self.bot.get_me().full_name
-        limit = 64
-        add_to_name = ["FunPay Bot | Бот ФанПей", "FunPay Bot", "FunPayBot", "FunPay"]
-        new_name = name
-        if "vertex" in new_name.lower():
-            new_name = ""
-        new_name = new_name.split("ㅤ")[0].strip()
-        if "funpay" not in new_name.lower():
-            for m_name in add_to_name:
-                if len(new_name) + 2 + len(m_name) <= limit:
-                    new_name = f"{(new_name + ' ').ljust(limit - len(m_name) - 1, 'ㅤ')} {m_name}"
-                    break
-            if new_name != name:
-                self.bot.set_my_name(new_name)
+        Название бота не трогаем: его задаёт владелец через @BotFather.
+        """
         sh_text = "🛠️ github.com/NightStrang6r/FunPayVertex 👨‍💻 NightStrang6r 💬 @funpayplace"
         res = self.bot.get_my_short_description().short_description
         if res != sh_text:
