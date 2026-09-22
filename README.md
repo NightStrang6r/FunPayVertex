@@ -2,7 +2,7 @@
 <h4 align="center">Простой и эффективный бот для автоматизации FunPay</h4>
 
 <h1 align="center">
-    <img src="https://i.ibb.co/Sc5mL1G/Screenshot-141.png" alt="Консоль FunPay Vertex при запуске">
+    <img src="docs/console.png" alt="Консоль FunPay Vertex при запуске">
 </h1>
 
 <h2 align="center">Перед началом рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат (клик)</a>. Тут и поможем чем сможем и посидеть можно.</h2>
