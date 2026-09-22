@@ -112,7 +112,7 @@ docker-compose up -d --build
 
 ## :pray: Благодарности
 
-FunPay Vertex основан на кодовой базе проекта [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) (автор — sidor0912, при участии Woopertail). Спасибо авторам за проделанную работу.
+Новый реворк FunPay Vertex основан на кодовой базе проекта [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) (автор — sidor0912). Спасибо авторам за проделанную работу.
 
 Данная сборка поддерживается отдельно: из неё удалена подсистема рассылки объявлений и механизм автоматического обновления из стороннего репозитория.
 
