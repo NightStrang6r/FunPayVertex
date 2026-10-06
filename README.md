@@ -7,6 +7,9 @@
 
 <h2 align="center">Перед началом рекомендую залететь в наш <a href="https://t.me/funpayplace">Telegram чат (клик)</a>. Тут и поможем чем сможем и посидеть можно.</h2>
 
+> [!TIP]
+> Нужна автоматизация прямо в браузере, без запуска бота? Попробуйте **[FunPay Lite Bot - расширение для FunPay](https://chromewebstore.google.com/detail/funpay-lite-bot/amicfiagmpbgfiiopieeemlkblfeeeip)**: автоподнятие лотов, автоответчик, статистика продаж, тёмная тема. 60 000 пользователей, работает в [Chrome](https://chromewebstore.google.com/detail/funpay-lite-bot/amicfiagmpbgfiiopieeemlkblfeeeip) и [Firefox](https://addons.mozilla.org/firefox/addon/funpay-lite-bot/). Подробнее на [funpaylitebot.com](https://funpaylitebot.com).
+
 ## :clipboard: **Содержание**
 
 - [Возможности](#robot-возможности)
